@@ -57,6 +57,18 @@ export interface IncidentReport {
   gpsVerificationMode?: 'hardware_gps' | 'demo_academico';
   gyroscope?: GyroscopeTelemetry;
   recommendations: string[];
+  /** Id del usuario que envió el reporte (null en datos antiguos) */
+  ownerId?: string | null;
+}
+
+export type UserRole = 'ciudadano' | 'admin';
+
+export interface AuthUser {
+  id: string;
+  name: string;
+  email: string;
+  role: UserRole;
+  createdAt?: string;
 }
 
 export interface HealthAlert {

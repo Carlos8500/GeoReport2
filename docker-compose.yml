@@ -1,0 +1,64 @@
+# =====================================================================
+# RABIA-CUN · Backend local con Docker Compose
+#   docker compose up -d --build     → levanta BD + API + Adminer
+#   docker compose logs -f api       → ver peticiones de la API
+#   docker compose down              → detiene (los datos se conservan)
+#   docker compose down -v           → detiene y BORRA la base (se recrea con los datos de prueba)
+# Las contraseñas por defecto son SOLO de desarrollo; se pueden cambiar en un archivo .env
+# =====================================================================
+name: rabia-cun
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: rabiacun
+      POSTGRES_USER: rabiacun
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-rabiacun_dev}
+      TZ: America/Cancun
+      PGTZ: America/Cancun
+    volumes:
+      # Volumen administrado por Docker (fuera de OneDrive para evitar corrupción)
+      - pgdata:/var/lib/postgresql/data
+      # Esquema + datos de prueba: se ejecutan sólo la primera vez
+      - ./server/db/init:/docker-entrypoint-initdb.d:ro
+    ports:
+      # Sólo accesible desde esta PC (pgAdmin, DBeaver); la red local entra por la API
+      - "127.0.0.1:5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rabiacun -d rabiacun"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  api:
+    build: ./server
+    restart: unless-stopped
+    environment:
+      PORT: 4000
+      DATABASE_URL: postgres://rabiacun:${POSTGRES_PASSWORD:-rabiacun_dev}@db:5432/rabiacun
+      TZ: America/Cancun
+      # Se leen del archivo .env (no se sube a GitHub). Ver .env.example
+      JWT_SECRET: ${JWT_SECRET:-}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@rabiacun.test}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      # Expuesta a la red local: celulares/tabletas usan http://<IP-de-la-PC>:4000/api
+      - "4000:4000"
+
+  adminer:
+    image: adminer:4
+    restart: unless-stopped
+    depends_on:
+      - db
+    environment:
+      ADMINER_DEFAULT_SERVER: db
+    ports:
+      - "127.0.0.1:8080:8080"
+
+volumes:
+  pgdata:

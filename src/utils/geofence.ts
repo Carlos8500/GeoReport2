@@ -1,16 +1,38 @@
 import { IncidentReport, LatLng } from '../types/rabiaCun';
 
 /**
- * Vértices exactos del polígono triangular rojo trazado sobre Cancún:
- * - Norte: Cruce Av. Xcaret / Av. Andrés Quintana Roo / Av. Kabah (junto a SM 21 / Las Plazas Outlet)
- * - Sureste: Cruce Av. Rodrigo Gómez (Av. Kabah) y Av. Cancún (Las Torres) / Av. Huayacán (SM 56/57)
- * - Suroeste: Cruce Av. Andrés Quintana Roo y Av. Cancún (Las Torres) (SM 516 / SM 523 / IMSS HGR No. 17)
+ * Geocerca principal: zona urbana de Cancún (Benito Juárez, Q. Roo).
+ * Polígono aproximado que cubre Puerto Juárez, el Centro (SM 1-30), las Regiones
+ * del poniente, el sur (Av. Huayacán / Aeropuerto) y la Zona Hotelera.
+ * Excluye Isla Mujeres, Puerto Morelos y Playa del Carmen.
+ * Coordenadas WGS84 (las mismas que entrega el GPS y usa OpenStreetMap).
  */
-export const KABAH_POLYGON_VERTICES: LatLng[] = [
-  { lat: 21.1538, lng: -86.8355 }, // Vértice Norte (Av. Xcaret / Av. Kabah)
-  { lat: 21.1268, lng: -86.8286 }, // Vértice Sureste (Av. Rodrigo Gómez / Av. Cancún)
-  { lat: 21.1252, lng: -86.8578 }, // Vértice Suroeste (Av. Cancún / SM 516 - IMSS 17)
+export const CANCUN_GEOFENCE_VERTICES: LatLng[] = [
+  { lat: 21.25, lng: -86.96 }, // Noroeste
+  { lat: 21.25, lng: -86.79 }, // Norte · Punta Sam
+  { lat: 21.165, lng: -86.79 }, // Costa · Puerto Juárez
+  { lat: 21.15, lng: -86.725 }, // Punta Cancún (Zona Hotelera norte)
+  { lat: 21.02, lng: -86.755 }, // Punta Nizuc (Zona Hotelera sur)
+  { lat: 20.99, lng: -86.83 }, // Sur · Aeropuerto
+  { lat: 20.99, lng: -86.96 }, // Suroeste
+  { lat: 21.12, lng: -86.99 }, // Poniente
 ];
+
+/**
+ * Área alrededor del Parque Ecológico Kabah donde se conocen las Supermanzanas
+ * con más detalle (sólo para nombrar la zona de un reporte; no restringe nada).
+ */
+const KABAH_DETAIL_BOUNDS = {
+  minLat: 21.125,
+  maxLat: 21.154,
+  minLng: -86.858,
+  maxLng: -86.8285,
+};
+
+export const CANCUN_MAP_CENTER: LatLng = {
+  lat: 21.1405,
+  lng: -86.8466,
+};
 
 export const KABAH_MAP_CENTER: LatLng = {
   lat: 21.1372,
@@ -50,12 +72,12 @@ export function clampToRadiusMeters(
 }
 
 /**
- * Ray-casting Point-in-Polygon algorithm para validar si una coordenada (lat, lng)
- * se encuentra dentro del polígono rojo del Parque Ecológico Kabah y alrededores.
+ * Ray-casting Point-in-Polygon: valida si una coordenada (lat, lng) está dentro
+ * de un polígono. Por defecto usa la geocerca urbana de Cancún.
  */
 export function isPointInPolygon(
   point: LatLng,
-  polygon: LatLng[] = KABAH_POLYGON_VERTICES
+  polygon: LatLng[] = CANCUN_GEOFENCE_VERTICES
 ): boolean {
   if (polygon.length < 3) return false;
 
@@ -77,8 +99,9 @@ export function isPointInPolygon(
 }
 
 /**
- * Detecta automáticamente la Supermanzana o sector dentro del área de estudio
- * según las coordenadas seleccionadas en el mapa.
+ * Sector aproximado de Cancún (sin servicios externos). Alrededor del Parque
+ * Kabah se identifica la Supermanzana; en el resto de la ciudad se asigna una
+ * región general.
  */
 export function detectSupermanzana(point: LatLng): {
   code: string;
@@ -89,13 +112,65 @@ export function detectSupermanzana(point: LatLng): {
 
   if (!inside) {
     return {
-      code: 'Fuera del Polígono Kabah',
-      sectorName: 'Ubicación externa al triángulo de vigilancia (Envío bloqueado)',
+      code: 'Fuera de Cancún',
+      sectorName: 'Ubicación externa a la zona urbana de Cancún (Envío bloqueado)',
       insidePolygon: false,
     };
   }
 
-  // Parque Ecológico Kabah (triángulo verde central entre Av. Nichupté y Av. Kabah)
+  if (
+    point.lat >= KABAH_DETAIL_BOUNDS.minLat &&
+    point.lat <= KABAH_DETAIL_BOUNDS.maxLat &&
+    point.lng >= KABAH_DETAIL_BOUNDS.minLng &&
+    point.lng <= KABAH_DETAIL_BOUNDS.maxLng
+  ) {
+    return { ...detectKabahSector(point), insidePolygon: true };
+  }
+
+  if (point.lng > -86.795 && point.lat < 21.15) {
+    return {
+      code: 'Zona Hotelera',
+      sectorName: 'Zona Hotelera · Blvd. Kukulcán (aprox.)',
+      insidePolygon: true,
+    };
+  }
+  if (point.lat >= 21.175) {
+    return {
+      code: 'Puerto Juárez / Norte',
+      sectorName: 'Norte de Cancún · Puerto Juárez / Av. López Portillo (aprox.)',
+      insidePolygon: true,
+    };
+  }
+  if (point.lat >= 21.145 && point.lng > -86.845) {
+    return {
+      code: 'Centro (SM 1–30)',
+      sectorName: 'Centro de Cancún · Av. Tulum / Av. Yaxchilán (aprox.)',
+      insidePolygon: true,
+    };
+  }
+  if (point.lat < 21.115) {
+    return {
+      code: 'Sur / Huayacán',
+      sectorName: 'Sur de Cancún · Av. Huayacán / Aeropuerto (aprox.)',
+      insidePolygon: true,
+    };
+  }
+  if (point.lng < -86.86) {
+    return {
+      code: 'Regiones Poniente',
+      sectorName: 'Poniente de Cancún · Regiones / Av. Kabah Oeste (aprox.)',
+      insidePolygon: true,
+    };
+  }
+  return {
+    code: 'Cancún · Zona urbana',
+    sectorName: 'Zona urbana de Cancún (aprox.)',
+    insidePolygon: true,
+  };
+}
+
+/** Supermanzanas alrededor del Parque Ecológico Kabah. */
+function detectKabahSector(point: LatLng): { code: string; sectorName: string } {
   if (
     point.lat >= 21.1365 &&
     point.lat <= 21.1495 &&
@@ -105,29 +180,20 @@ export function detectSupermanzana(point: LatLng): {
     return {
       code: 'Parque Ecológico Kabah',
       sectorName: 'Reserva Urbana Kabah · Senderos y Área Silvestre',
-      insidePolygon: inside,
     };
   }
-
-  // SM 48 (Noroeste del Parque Kabah, junto a Av. Kohunlich / Korat)
   if (point.lat >= 21.1375 && point.lng < -86.8405) {
     return {
       code: 'SM 48',
       sectorName: 'Supermanzana 48 · Corredor Av. Kohunlich / Andrés Q. Roo',
-      insidePolygon: inside,
     };
   }
-
-  // SM 50 (Oeste de Av. Kohunlich / Av. Nichupté)
   if (point.lat >= 21.1345 && point.lat < 21.142 && point.lng < -86.8445) {
     return {
       code: 'SM 50',
       sectorName: 'Supermanzana 50 · Sector Av. Kinik / Av. Nichupté',
-      insidePolygon: inside,
     };
   }
-
-  // SM 51 (Sur de Av. Nichupté, norte de Paraíso Villas)
   if (
     point.lat >= 21.1308 &&
     point.lat < 21.1375 &&
@@ -137,34 +203,23 @@ export function detectSupermanzana(point: LatLng): {
     return {
       code: 'SM 51',
       sectorName: 'Supermanzana 51 · Av. Nichupté Sur / Rodrigo Gómez',
-      insidePolygon: inside,
     };
   }
-
-  // SM 56 / Paraíso Villas (Sureste del triángulo, hacia Av. Cancún y Rodrigo Gómez)
   if (point.lat < 21.1315 && point.lng >= -86.843) {
     return {
       code: 'SM 56 · Paraíso Villas',
       sectorName: 'Supermanzana 56 · Corredor Paraíso Villas / Av. Rodrigo Gómez',
-      insidePolygon: inside,
     };
   }
-
-  // SM 523 / SM 516 (Suroeste del triángulo, cerca de IMSS HGR 17 y Av. Cancún)
   if (point.lat < 21.1345 && point.lng < -86.843) {
     return {
       code: 'SM 523 / SM 516',
       sectorName: 'Sector Suroeste · Av. Cancún (Las Torres) / Entorno IMSS HGR 17',
-      insidePolygon: inside,
     };
   }
-
   return {
-    code: inside ? 'Polígono Kabah Central' : 'Zona Externa (Fuera de Geocerca)',
-    sectorName: inside
-      ? 'Corredor de Vigilancia Parque Kabah'
-      : 'Ubicación fuera del polígono prioritario trazado',
-    insidePolygon: inside,
+    code: 'Zona Av. Kabah',
+    sectorName: 'Corredor Av. Kabah / Av. Nichupté (aprox.)',
   };
 }
 

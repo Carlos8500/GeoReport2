@@ -11,23 +11,36 @@ import {
   PlusCircle,
   Bell,
   BarChart3,
-  Code2,
   Map,
   CheckCircle2,
   Navigation,
   Wifi,
+  WifiOff,
   AlertTriangle,
+  Pencil,
+  Trash2,
+  UserRound,
+  Lock,
+  LogIn,
+  XCircle,
 } from 'lucide-react';
 import {
+  AnimalSpecies,
+  AuthUser,
+  EventType,
   GyroscopeTelemetry,
+  HealthAlert,
   IncidentReport,
   LatLng,
   VerificationStatus,
 } from './types/rabiaCun';
 import {
-  INITIAL_INCIDENT_REPORTS,
-  OFFICIAL_HEALTH_ALERTS,
-} from './data/seedCancun';
+  alertsApi,
+  describeError,
+  incidentsApi,
+  IncidentEditPayload,
+  subscribeToChanges,
+} from './services/api';
 import {
   IMSS_HGR_17_COORDS,
   KABAH_MAP_CENTER,
@@ -42,23 +55,68 @@ import {
   shortestAngleDiff,
   smoothHeadingFloat,
 } from './utils/gyroscope';
-import { KabahInteractiveMap } from './components/KabahInteractiveMap';
+import { IncidentMap } from './components/IncidentMap';
 import { ReportWizardPanel } from './components/ReportWizardPanel';
 import {
   AlertsAndPreventionView,
   StatsAndAdminReviewView,
-  TechnicalBlueprintView,
 } from './components/SecondaryViews';
+import { ProfileView } from './components/ProfileView';
+import { AuthImage } from './components/AuthImage';
 
-type ActiveTab = 'mapa' | 'alertas' | 'estadisticas' | 'arquitectura';
+type ActiveTab = 'mapa' | 'alertas' | 'estadisticas' | 'perfil';
+type ToastKind = 'success' | 'warning' | 'error';
 
-export default function App() {
+const TOAST_STYLES: Record<ToastKind, string> = {
+  success: 'bg-[#087E8B] text-white',
+  warning: 'bg-[#E7A83E] text-slate-950',
+  error: 'bg-red-700 text-white',
+};
+
+interface AppProps {
+  /** null = visitante sin sesión (sólo consulta) */
+  currentUser: AuthUser | null;
+  onLogout: () => void;
+  onUserChange: (user: AuthUser) => void;
+  /** Muestra la pantalla de inicio de sesión con un mensaje opcional */
+  onRequestLogin: (message?: string | null) => void;
+}
+
+const EDIT_EVENT_TYPES: EventType[] = [
+  'avistamiento',
+  'mordedura',
+  'aranazo',
+  'comportamiento_erratico',
+];
+const EDIT_SPECIES: AnimalSpecies[] = [
+  'zorra_gris',
+  'perro',
+  'gato',
+  'coati_mapache',
+  'murcielago',
+];
+
+export default function App({
+  currentUser,
+  onLogout,
+  onUserChange,
+  onRequestLogin,
+}: AppProps) {
+  const isGuest = currentUser === null;
+  const isAdmin = currentUser?.role === 'admin';
+  /** El autor del reporte o un administrador pueden editarlo/eliminarlo. */
+  const canModify = (incident: IncidentReport) =>
+    Boolean(currentUser) &&
+    (isAdmin || incident.ownerId === currentUser?.id);
   const [activeTab, setActiveTab] = useState<ActiveTab>('mapa');
-  const [incidents, setIncidents] = useState<IncidentReport[]>(
-    INITIAL_INCIDENT_REPORTS
-  );
+  const [incidents, setIncidents] = useState<IncidentReport[]>([]);
+  const [alerts, setAlerts] = useState<HealthAlert[]>([]);
+  const [isLoadingData, setIsLoadingData] = useState<boolean>(true);
+  const [isSubmittingReport, setIsSubmittingReport] = useState<boolean>(false);
+  const [editDraft, setEditDraft] = useState<IncidentEditPayload | null>(null);
+  const [isSavingEdit, setIsSavingEdit] = useState<boolean>(false);
   const [selectedIncidentId, setSelectedIncidentId] = useState<string | null>(
-    INITIAL_INCIDENT_REPORTS[0].id
+    null
   );
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [isReporting, setIsReporting] = useState<boolean>(false);
@@ -70,8 +128,10 @@ export default function App() {
   const [gyroscope, setGyroscope] = useState<GyroscopeTelemetry>(() =>
     buildGyroscopeTelemetry(0, 70, 0, 'interactivo')
   );
-  const [lanSyncActive, setLanSyncActive] = useState<boolean>(false);
-  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  // true = la API respondió en la última consulta; false = sin servidor
+  const [apiOnline, setApiOnline] = useState<boolean>(false);
+  // Aviso temporal: confirmación (verde), advertencia (ámbar) o error (rojo)
+  const [toast, setToast] = useState<{ message: string; kind: ToastKind } | null>(null);
 
   const hasAbsoluteOrientationRef = useRef<boolean>(false);
   const lastDeviceOrientationEventTimeRef = useRef<number>(0);
@@ -99,87 +159,70 @@ export default function App() {
     visibleIncidents[0] ||
     null;
 
-  const showToast = useCallback((msg: string) => {
-    setToastMessage(msg);
+  useEffect(() => {
+    setEditDraft(null);
+  }, [selectedIncident?.id]);
+
+  const showToast = useCallback((msg: string, kind: ToastKind = 'success') => {
+    setToast({ message: msg, kind });
+    // Los errores permanecen más tiempo en pantalla para poder leerlos
     setTimeout(() => {
-      setToastMessage((current) => (current === msg ? null : current));
-    }, 4000);
+      setToast((current) => (current?.message === msg ? null : current));
+    }, kind === 'error' ? 8000 : 4000);
   }, []);
 
-  // 1. REAL-TIME LAN MULTI-DEVICE SYNCHRONIZATION (/api/incidents + SSE stream)
+  // 1. CARGA DE DATOS DESDE LA API + SINCRONIZACIÓN EN TIEMPO REAL (SSE)
+  const loadIncidents = useCallback(async () => {
+    try {
+      const data = await incidentsApi.list();
+      setIncidents(data);
+      setApiOnline(true);
+      return true;
+    } catch {
+      setApiOnline(false);
+      return false;
+    }
+  }, []);
+
+  const loadAlerts = useCallback(async () => {
+    try {
+      setAlerts(await alertsApi.list());
+    } catch {
+      // El estado de conexión ya lo reporta loadIncidents
+    }
+  }, []);
+
   useEffect(() => {
     let isMounted = true;
 
-    const syncFromServer = async () => {
-      try {
-        const res = await fetch('/api/incidents');
-        if (!res.ok) return;
-        const data = await res.json();
-        if (!isMounted) return;
-
-        if (!data.initialized) {
-          // Initialize server shared state with seed incidents
-          const initRes = await fetch('/api/incidents/init', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ incidents: INITIAL_INCIDENT_REPORTS }),
-          });
-          if (initRes.ok) {
-            const initData = await initRes.json();
-            if (isMounted && Array.isArray(initData.incidents)) {
-              setIncidents(initData.incidents);
-              setLanSyncActive(true);
-            }
-          }
-        } else if (Array.isArray(data.incidents)) {
-          setIncidents(data.incidents);
-          setLanSyncActive(true);
-        }
-      } catch {
-        // Offline or local-only fallback
+    Promise.all([loadIncidents(), loadAlerts()]).then(([ok]) => {
+      if (!isMounted) return;
+      setIsLoadingData(false);
+      if (!ok) {
+        showToast('No hay conexión con el servidor. Verifica que Docker esté encendido.', 'error');
       }
-    };
+    });
 
-    syncFromServer();
+    // Otro dispositivo cambió datos -> volver a consultar la API
+    const unsubscribe = subscribeToChanges(
+      (resource) => {
+        if (resource === 'incidents') loadIncidents();
+        else loadAlerts();
+      },
+      (connected) => {
+        if (connected) loadIncidents();
+      }
+    );
 
-    // Connect to Server-Sent Events stream for instant multi-device updates
-    let eventSource: EventSource | null = null;
-    try {
-      eventSource = new EventSource('/api/incidents/stream');
-      eventSource.onmessage = (event) => {
-        try {
-          const payload = JSON.parse(event.data);
-          if (
-            isMounted &&
-            payload.type === 'sync' &&
-            payload.initialized &&
-            Array.isArray(payload.incidents)
-          ) {
-            setIncidents(payload.incidents);
-            setLanSyncActive(true);
-          }
-        } catch {
-          // Ignore malformed event
-        }
-      };
-      eventSource.onerror = () => {
-        // Fallback polling handles temporary disconnects
-      };
-    } catch {
-      // Fallback to polling
-    }
-
-    // 3-second polling fallback for mobile browsers that suspend EventSource
-    const pollInterval = setInterval(syncFromServer, 3000);
+    // Respaldo: algunos navegadores móviles suspenden EventSource en segundo plano
+    const pollInterval = setInterval(loadIncidents, 15000);
 
     return () => {
       isMounted = false;
+      unsubscribe();
       clearInterval(pollInterval);
-      if (eventSource) {
-        eventSource.close();
-      }
     };
-  }, []);
+  }, [loadIncidents, loadAlerts, showToast]);
 
   // 2. AUTOMATIC GYROSCOPE / COMPASS ORIENTATION + GAZE / GPS TRACKING
   const commitHeadingToState = useCallback(
@@ -532,7 +575,7 @@ export default function App() {
   const handleRequestHardwareGps = () => {
     ensureIosGyroPermission();
     if (!('geolocation' in navigator)) {
-      showToast('El navegador no soporta geolocalización.');
+      showToast('El navegador no soporta geolocalización.', 'error');
       return;
     }
     setIsLocatingGps(true);
@@ -551,13 +594,17 @@ export default function App() {
       },
       () => {
         setIsLocatingGps(false);
-        showToast('Sin acceso al GPS. Usa Demo para simular ubicación.');
+        showToast('Sin acceso al GPS. Usa Demo para simular ubicación.', 'warning');
       },
       { enableHighAccuracy: true, timeout: 7000 }
     );
   };
 
   const handleStartReport = () => {
+    if (isGuest) {
+      onRequestLogin('Inicia sesión o crea una cuenta para enviar un reporte.');
+      return;
+    }
     ensureIosGyroPermission();
     setActiveTab('mapa');
     setDraftLocation(userGpsLocation);
@@ -565,37 +612,86 @@ export default function App() {
   };
 
   const handleCreateReport = async (newReport: IncidentReport) => {
-    setIncidents((prev) => {
-      if (prev.some((i) => i.id === newReport.id)) return prev;
-      return [newReport, ...prev];
-    });
-    setSelectedIncidentId(newReport.id);
-    setDraftLocation({ lat: newReport.approxLat, lng: newReport.approxLng });
-    setActiveTab('mapa');
-    setIsReporting(false);
-    setStatusFilter('all');
+    if (isSubmittingReport) return;
+    // id, folio, estado y fecha los asigna el servidor
+    const {
+      id: _id,
+      folio: _folio,
+      verificationStatus: _status,
+      reportedAt: _reportedAt,
+      photoUrl,
+      ...fields
+    } = newReport;
 
+    setIsSubmittingReport(true);
     try {
-      const res = await fetch('/api/incidents', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          report: newReport,
-          fallbackSeedIncidents: INITIAL_INCIDENT_REPORTS,
-        }),
+      const created = await incidentsApi.create({
+        ...fields,
+        photoDataUrl: photoUrl ?? null,
       });
-      if (res.ok) {
-        const data = await res.json();
-        if (Array.isArray(data.incidents)) {
-          setIncidents(data.incidents);
-        }
-        setLanSyncActive(true);
-      }
-    } catch {
-      // Kept in local state if network request fails
+      setIncidents((prev) => [created, ...prev.filter((i) => i.id !== created.id)]);
+      setSelectedIncidentId(created.id);
+      setDraftLocation({ lat: created.approxLat, lng: created.approxLng });
+      setActiveTab('mapa');
+      setIsReporting(false);
+      setStatusFilter('all');
+      setApiOnline(true);
+      showToast(`Reporte ${created.folio} registrado en ${created.supermanzana}.`);
+    } catch (err) {
+      // El formulario se mantiene abierto con sus datos para reintentar
+      showToast(`No se pudo enviar el reporte: ${describeError(err)}`, 'error');
+    } finally {
+      setIsSubmittingReport(false);
     }
+  };
 
-    showToast(`Reporte ${newReport.folio} publicado en ${newReport.supermanzana}.`);
+  const handleStartEdit = (incident: IncidentReport) => {
+    setEditDraft({
+      title: incident.title,
+      eventType: incident.eventType,
+      species: incident.species,
+      referenceLandmark: incident.referenceLandmark,
+      description: incident.description,
+    });
+  };
+
+  const handleSaveEdit = async (incidentId: string) => {
+    if (!editDraft) return;
+    if (editDraft.title.trim().length < 5) {
+      showToast('El título debe tener al menos 5 caracteres.', 'warning');
+      return;
+    }
+    if (editDraft.description.trim().length < 10) {
+      showToast('La descripción debe tener al menos 10 caracteres.', 'warning');
+      return;
+    }
+    setIsSavingEdit(true);
+    try {
+      const updated = await incidentsApi.update(incidentId, editDraft);
+      setIncidents((prev) => prev.map((i) => (i.id === updated.id ? updated : i)));
+      setEditDraft(null);
+      showToast(`Reporte ${updated.folio} actualizado.`);
+    } catch (err) {
+      showToast(`No se pudo actualizar: ${describeError(err)}`, 'error');
+    } finally {
+      setIsSavingEdit(false);
+    }
+  };
+
+  const handleDeleteIncident = async (incident: IncidentReport) => {
+    const confirmed = window.confirm(
+      `¿Eliminar definitivamente el reporte ${incident.folio}? Esta acción no se puede deshacer.`
+    );
+    if (!confirmed) return;
+    try {
+      await incidentsApi.remove(incident.id);
+      setIncidents((prev) => prev.filter((i) => i.id !== incident.id));
+      setSelectedIncidentId(null);
+      setEditDraft(null);
+      showToast(`Reporte ${incident.folio} eliminado.`);
+    } catch (err) {
+      showToast(`No se pudo eliminar: ${describeError(err)}`, 'error');
+    }
   };
 
   const handleUpdateIncidentStatus = async (
@@ -613,45 +709,20 @@ export default function App() {
       });
     }
 
-    setIncidents((prev) =>
-      prev.map((inc) =>
-        inc.id === incidentId
-          ? {
-              ...inc,
-              verificationStatus: newStatus,
-              officialSource:
-                newStatus === 'verificado_oficial'
-                  ? officialSource ||
-                    'SESA Quintana Roo · Jurisdicción Sanitaria No. 2'
-                  : inc.officialSource,
-              evidenceNote,
-            }
-          : inc
-      )
-    );
-
     try {
-      const res = await fetch('/api/incidents', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          id: incidentId,
-          verificationStatus: newStatus,
-          officialSource,
-          evidenceNote,
-        }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        if (Array.isArray(data.incidents)) {
-          setIncidents(data.incidents);
-        }
-      }
-    } catch {
-      // Local state already updated
+      const updated = await incidentsApi.verify(
+        incidentId,
+        newStatus,
+        officialSource,
+        evidenceNote
+      );
+      setIncidents((prev) =>
+        prev.map((inc) => (inc.id === updated.id ? updated : inc))
+      );
+      showToast(`Estado de ${updated.folio} actualizado.`);
+    } catch (err) {
+      showToast(`No se pudo actualizar el estado: ${describeError(err)}`, 'error');
     }
-
-    showToast('Estado actualizado y sincronizado.');
   };
 
   const statusLabel = (status: VerificationStatus) => {
@@ -747,23 +818,33 @@ export default function App() {
                 : 'hover:text-white'
             }`}
           >
-            Revisión
+            {isAdmin ? 'Revisión' : 'Estadísticas'}
           </button>
           <button
             type="button"
-            onClick={() => setActiveTab('arquitectura')}
+            onClick={() => setActiveTab('perfil')}
             className={`py-1 transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
-              activeTab === 'arquitectura'
+              activeTab === 'perfil'
                 ? 'text-white underline underline-offset-8 decoration-[#2DD4BF] decoration-2 font-semibold'
                 : 'hover:text-white'
             }`}
           >
-            Guía RN
+            {isGuest ? 'Cuenta' : 'Perfil'}
           </button>
         </nav>
 
-        {/* Zone 3: 1 primary action */}
-        <div className="flex items-center shrink-0">
+        {/* Zone 3: primary action (+ entrar para visitantes) */}
+        <div className="flex items-center gap-2 shrink-0">
+          {isGuest && (
+            <button
+              type="button"
+              onClick={() => onRequestLogin(null)}
+              className="px-3 py-2 text-xs font-semibold text-white border border-white/30 hover:bg-white/10 rounded-lg transition-colors whitespace-nowrap shrink-0 inline-flex items-center gap-1.5 cursor-pointer"
+            >
+              <LogIn className="w-3.5 h-3.5" />
+              <span>Entrar</span>
+            </button>
+          )}
           <button
             type="button"
             onClick={handleStartReport}
@@ -774,34 +855,42 @@ export default function App() {
         </div>
       </header>
 
-      {/* Toast Feedback Banner */}
-      {toastMessage && (
+      {/* Toast Feedback Banner: éxito, advertencia o error */}
+      {toast && (
         <div
-          role="status"
-          className="bg-[#087E8B] text-white px-6 py-2 text-xs font-medium flex items-center justify-between gap-3"
+          role={toast.kind === 'error' ? 'alert' : 'status'}
+          className={`${TOAST_STYLES[toast.kind]} px-6 py-2 text-xs font-medium flex items-center justify-between gap-3`}
         >
           <div className="flex items-center gap-2 min-w-0">
-            <CheckCircle2 className="w-4 h-4 shrink-0" />
-            <span className="truncate">{toastMessage}</span>
+            {toast.kind === 'error' ? (
+              <XCircle className="w-4 h-4 shrink-0" />
+            ) : toast.kind === 'warning' ? (
+              <AlertTriangle className="w-4 h-4 shrink-0" />
+            ) : (
+              <CheckCircle2 className="w-4 h-4 shrink-0" />
+            )}
+            <span className={toast.kind === 'success' ? 'truncate' : 'break-words'}>
+              {toast.message}
+            </span>
           </div>
           <div className="flex items-center gap-3 shrink-0">
-            {activeTab !== 'mapa' && (
+            {toast.kind === 'success' && activeTab !== 'mapa' && (
               <button
                 type="button"
                 onClick={() => {
                   setIsReporting(false);
                   setActiveTab('mapa');
-                  setToastMessage(null);
+                  setToast(null);
                 }}
-                className="px-2.5 py-1 rounded-md bg-white/20 hover:bg-white/30 text-white font-semibold cursor-pointer"
+                className="px-2.5 py-1 rounded-md bg-white/20 hover:bg-white/30 font-semibold cursor-pointer"
               >
                 Ver en mapa
               </button>
             )}
             <button
               type="button"
-              onClick={() => setToastMessage(null)}
-              className="underline text-white/90 hover:text-white cursor-pointer"
+              onClick={() => setToast(null)}
+              className="underline opacity-90 hover:opacity-100 cursor-pointer"
             >
               Cerrar
             </button>
@@ -815,13 +904,28 @@ export default function App() {
         <section className="bg-white border border-slate-200 rounded-2xl px-4 py-3 flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-3 min-w-0">
             <h1 className="text-base sm:text-lg font-bold text-[#123047] truncate">
-              Vigilancia Parque Kabah · Cancún
+              Vigilancia Sanitaria · Cancún
             </h1>
-            {lanSyncActive && (
+            {apiOnline ? (
               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 text-[11px] font-semibold shrink-0">
                 <Wifi className="w-3 h-3" />
-                <span>Red LAN</span>
+                <span>Servidor en línea</span>
               </span>
+            ) : (
+              !isLoadingData && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    loadIncidents();
+                    loadAlerts();
+                  }}
+                  title="Reintentar conexión con la API"
+                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-red-50 text-red-700 border border-red-200 text-[11px] font-semibold shrink-0 cursor-pointer"
+                >
+                  <WifiOff className="w-3 h-3" />
+                  <span>Sin servidor · Reintentar</span>
+                </button>
+              )
             )}
           </div>
 
@@ -897,12 +1001,12 @@ export default function App() {
           )}
         </section>
 
-        {/* VIEW 1: INTERACTIVE KABAH POLYGON MAP + REPORT WIZARD / FICHA */}
+        {/* VIEW 1: MAPA DE INCIDENTES + FORMULARIO DE REPORTE / FICHA */}
         {activeTab === 'mapa' && (
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-stretch">
             {/* Left 7 Cols: Interactive Map */}
             <div className="lg:col-span-7 flex flex-col min-h-[540px]">
-              <KabahInteractiveMap
+              <IncidentMap
                 incidents={visibleIncidents}
                 selectedIncidentId={selectedIncident?.id ?? null}
                 onSelectIncident={(inc) => {
@@ -946,6 +1050,7 @@ export default function App() {
                   isLocatingGps={isLocatingGps}
                   gyroscope={gyroscope}
                   onSubmitReport={handleCreateReport}
+                  isSubmitting={isSubmittingReport}
                   onCancel={() => setIsReporting(false)}
                 />
               ) : (
@@ -995,6 +1100,117 @@ export default function App() {
                         </span>
                       </div>
 
+                      {editDraft ? (
+                        <form
+                          aria-label="Editar reporte"
+                          className="flex flex-col gap-2"
+                          onSubmit={(e) => {
+                            e.preventDefault();
+                            handleSaveEdit(selectedIncident.id);
+                          }}
+                        >
+                          <label className="text-[11px] font-semibold text-slate-600">
+                            Título
+                            <input
+                              type="text"
+                              required
+                              minLength={5}
+                              maxLength={200}
+                              value={editDraft.title}
+                              onChange={(e) =>
+                                setEditDraft({ ...editDraft, title: e.target.value })
+                              }
+                              className="mt-1 w-full px-3 py-2 rounded-lg border border-slate-300 text-xs font-normal text-slate-900"
+                            />
+                          </label>
+                          <div className="grid grid-cols-2 gap-2">
+                            <label className="text-[11px] font-semibold text-slate-600">
+                              Evento
+                              <select
+                                value={editDraft.eventType}
+                                onChange={(e) =>
+                                  setEditDraft({
+                                    ...editDraft,
+                                    eventType: e.target.value as EventType,
+                                  })
+                                }
+                                className="mt-1 w-full px-2 py-2 rounded-lg border border-slate-300 text-xs font-normal text-slate-900 bg-white"
+                              >
+                                {EDIT_EVENT_TYPES.map((type) => (
+                                  <option key={type} value={type}>
+                                    {eventLabel(type)}
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+                            <label className="text-[11px] font-semibold text-slate-600">
+                              Especie
+                              <select
+                                value={editDraft.species}
+                                onChange={(e) =>
+                                  setEditDraft({
+                                    ...editDraft,
+                                    species: e.target.value as AnimalSpecies,
+                                  })
+                                }
+                                className="mt-1 w-full px-2 py-2 rounded-lg border border-slate-300 text-xs font-normal text-slate-900 bg-white"
+                              >
+                                {EDIT_SPECIES.map((sp) => (
+                                  <option key={sp} value={sp}>
+                                    {speciesLabel(sp)}
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+                          </div>
+                          <label className="text-[11px] font-semibold text-slate-600">
+                            Referencia
+                            <input
+                              type="text"
+                              maxLength={200}
+                              value={editDraft.referenceLandmark}
+                              onChange={(e) =>
+                                setEditDraft({
+                                  ...editDraft,
+                                  referenceLandmark: e.target.value,
+                                })
+                              }
+                              className="mt-1 w-full px-3 py-2 rounded-lg border border-slate-300 text-xs font-normal text-slate-900"
+                            />
+                          </label>
+                          <label className="text-[11px] font-semibold text-slate-600">
+                            Descripción
+                            <textarea
+                              required
+                              minLength={10}
+                              maxLength={2000}
+                              rows={3}
+                              value={editDraft.description}
+                              onChange={(e) =>
+                                setEditDraft({ ...editDraft, description: e.target.value })
+                              }
+                              className="mt-1 w-full px-3 py-2 rounded-lg border border-slate-300 text-xs font-normal text-slate-900"
+                            />
+                          </label>
+                          <div className="flex justify-end gap-2">
+                            <button
+                              type="button"
+                              onClick={() => setEditDraft(null)}
+                              className="px-3 py-1.5 rounded-lg border border-slate-200 hover:bg-slate-50 text-xs font-semibold text-slate-700 cursor-pointer"
+                            >
+                              Cancelar
+                            </button>
+                            <button
+                              type="submit"
+                              disabled={isSavingEdit}
+                              className="px-3 py-1.5 rounded-lg bg-[#087E8B] hover:bg-[#066873] disabled:opacity-60 text-white text-xs font-semibold cursor-pointer"
+                            >
+                              {isSavingEdit ? 'Guardando…' : 'Guardar cambios'}
+                            </button>
+                          </div>
+                        </form>
+                      ) : (
+                      <>
                       <div>
                         <h2 className="text-sm font-bold text-slate-900">
                           {selectedIncident.title}
@@ -1035,14 +1251,29 @@ export default function App() {
                       <p className="text-xs text-slate-700 leading-relaxed">
                         {selectedIncident.description}
                       </p>
+                      </>
+                      )}
 
                       {selectedIncident.photoUrl && (
                         <div className="rounded-xl overflow-hidden border border-slate-200 bg-slate-100">
-                          <img
-                            src={selectedIncident.photoUrl}
-                            alt={`Evidencia de ${selectedIncident.folio}`}
-                            className="w-full h-36 object-cover"
-                          />
+                          {isGuest ? (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                onRequestLogin('Inicia sesión para ver las fotos de evidencia.')
+                              }
+                              className="w-full h-24 flex flex-col items-center justify-center gap-1 text-xs text-slate-600 hover:bg-slate-200/60 cursor-pointer"
+                            >
+                              <Lock className="w-4 h-4" />
+                              <span>Foto de evidencia · inicia sesión para verla</span>
+                            </button>
+                          ) : (
+                            <AuthImage
+                              src={selectedIncident.photoUrl}
+                              alt={`Evidencia de ${selectedIncident.folio}`}
+                              className="w-full h-36 object-cover"
+                            />
+                          )}
                         </div>
                       )}
 
@@ -1077,18 +1308,45 @@ export default function App() {
                         <span className="text-[11px] text-slate-500">
                           IMSS 17:{' '}
                           <strong className="font-mono-tabular text-slate-700">
-                            {calculateDistanceMeters(
-                              {
-                                lat: selectedIncident.approxLat,
-                                lng: selectedIncident.approxLng,
-                              },
-                              IMSS_HGR_17_COORDS
-                            )}{' '}
-                            m
+                            {(() => {
+                              const meters = calculateDistanceMeters(
+                                {
+                                  lat: selectedIncident.approxLat,
+                                  lng: selectedIncident.approxLng,
+                                },
+                                IMSS_HGR_17_COORDS
+                              );
+                              return meters >= 1000
+                                ? `${(meters / 1000).toFixed(1)} km`
+                                : `${meters} m`;
+                            })()}
                           </strong>
                         </span>
 
-                        <div className="flex items-center gap-2">
+                        <div className="flex flex-wrap items-center gap-2">
+                          {canModify(selectedIncident) && (
+                          <>
+                          <button
+                            type="button"
+                            onClick={() => handleStartEdit(selectedIncident)}
+                            disabled={Boolean(editDraft)}
+                            aria-label={`Editar reporte ${selectedIncident.folio}`}
+                            className="px-2.5 py-1.5 rounded-lg border border-slate-200 hover:bg-slate-50 disabled:opacity-50 text-xs font-semibold text-slate-700 inline-flex items-center gap-1 cursor-pointer"
+                          >
+                            <Pencil className="w-3.5 h-3.5" />
+                            <span>Editar</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteIncident(selectedIncident)}
+                            aria-label={`Eliminar reporte ${selectedIncident.folio}`}
+                            className="px-2.5 py-1.5 rounded-lg border border-red-200 hover:bg-red-50 text-xs font-semibold text-red-700 inline-flex items-center gap-1 cursor-pointer"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                            <span>Eliminar</span>
+                          </button>
+                          </>
+                          )}
                           <button
                             type="button"
                             onClick={() => setActiveTab('estadisticas')}
@@ -1109,7 +1367,11 @@ export default function App() {
                   ) : (
                     <div className="bg-white border border-slate-200 rounded-2xl p-6 text-center">
                       <p className="text-sm font-semibold text-slate-700">
-                        Sin reportes con este filtro.
+                        {isLoadingData
+                          ? 'Cargando reportes…'
+                          : !apiOnline && incidents.length === 0
+                          ? 'Sin conexión con el servidor.'
+                          : 'Sin reportes con este filtro.'}
                       </p>
                       <button
                         type="button"
@@ -1197,12 +1459,12 @@ export default function App() {
         {/* VIEW 2: OFFICIAL HEALTH ALERTS & PREVENTION CENTER */}
         {activeTab === 'alertas' && (
           <AlertsAndPreventionView
-            alerts={OFFICIAL_HEALTH_ALERTS}
+            alerts={alerts}
             onFocusHospitalOnMap={() => {
               setDraftLocation(IMSS_HGR_17_COORDS);
               setActiveTab('mapa');
               showToast(
-                'Mapa centrado en IMSS HGR No. 17 (Vértice Suroeste del Polígono Kabah).'
+                'Mapa centrado en IMSS HGR No. 17.'
               );
             }}
           />
@@ -1213,6 +1475,7 @@ export default function App() {
           <StatsAndAdminReviewView
             incidents={incidents}
             onUpdateIncidentStatus={handleUpdateIncidentStatus}
+            canReview={isAdmin}
             onSelectIncidentOnMap={(inc) => {
               setSelectedIncidentId(inc.id);
               setDraftLocation({ lat: inc.approxLat, lng: inc.approxLng });
@@ -1222,8 +1485,44 @@ export default function App() {
           />
         )}
 
-        {/* VIEW 4: REACT NATIVE + POSTGIS + DOCKER TECHNICAL BLUEPRINT */}
-        {activeTab === 'arquitectura' && <TechnicalBlueprintView />}
+        {/* VIEW 4: PERFIL DEL USUARIO + MIS REPORTES + CERRAR SESIÓN */}
+        {activeTab === 'perfil' && isGuest && (
+          <section className="max-w-lg w-full mx-auto bg-white border border-slate-200 rounded-2xl p-6 flex flex-col items-center text-center gap-3">
+            <div className="w-12 h-12 rounded-full bg-[#123047] text-white flex items-center justify-center">
+              <UserRound className="w-6 h-6" />
+            </div>
+            <h2 className="text-base font-bold text-[#123047]">Estás consultando como visitante</h2>
+            <p className="text-xs text-slate-600 leading-relaxed">
+              El mapa, los reportes, las alertas y las estadísticas son públicos. Con una cuenta
+              puedes enviar reportes con foto, dar seguimiento a los tuyos y ver las fotos de
+              evidencia.
+            </p>
+            <button
+              type="button"
+              onClick={() => onRequestLogin(null)}
+              className="mt-1 px-5 py-2.5 rounded-xl bg-[#087E8B] hover:bg-[#066873] text-white text-sm font-bold inline-flex items-center gap-2 cursor-pointer"
+            >
+              <LogIn className="w-4 h-4" />
+              <span>Iniciar sesión o crear cuenta</span>
+            </button>
+          </section>
+        )}
+        {activeTab === 'perfil' && currentUser && (
+          <ProfileView
+            user={currentUser}
+            myIncidents={incidents.filter((inc) => inc.ownerId === currentUser.id)}
+            onUserChange={onUserChange}
+            onLogout={onLogout}
+            showToast={showToast}
+            onOpenIncident={(inc) => {
+              setSelectedIncidentId(inc.id);
+              setDraftLocation({ lat: inc.approxLat, lng: inc.approxLng });
+              setIsReporting(false);
+              if (inc.verificationStatus !== 'rechazado') setStatusFilter('all');
+              setActiveTab('mapa');
+            }}
+          />
+        )}
       </main>
 
       {/* Mobile Bottom Tab Bar (Thumb-zone ergonomic navigation) */}
@@ -1281,20 +1580,23 @@ export default function App() {
           }`}
         >
           <BarChart3 className="w-4 h-4" />
-          <span className="mt-0.5">Revisión</span>
+          <span className="mt-0.5">{isAdmin ? 'Revisión' : 'Estadísticas'}</span>
         </button>
 
         <button
           type="button"
-          onClick={() => setActiveTab('arquitectura')}
+          onClick={() => {
+            setActiveTab('perfil');
+            setIsReporting(false);
+          }}
           className={`flex flex-col items-center justify-center min-h-[44px] text-[10px] font-medium cursor-pointer ${
-            activeTab === 'arquitectura'
+            activeTab === 'perfil'
               ? 'text-[#087E8B] font-bold'
               : 'text-slate-600'
           }`}
         >
-          <Code2 className="w-4 h-4" />
-          <span className="mt-0.5">Código RN</span>
+          {isGuest ? <LogIn className="w-4 h-4" /> : <UserRound className="w-4 h-4" />}
+          <span className="mt-0.5">{isGuest ? 'Entrar' : 'Perfil'}</span>
         </button>
       </nav>
     </div>

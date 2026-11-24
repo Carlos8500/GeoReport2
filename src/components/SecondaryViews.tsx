@@ -5,14 +5,9 @@ import {
   UserCheck,
   ExternalLink,
   PhoneCall,
-  Check,
-  Copy,
   FileCheck2,
   XCircle,
   Filter,
-  Smartphone,
-  Server,
-  Database,
 } from 'lucide-react';
 import {
   AnimalSpecies,
@@ -177,7 +172,7 @@ export const AlertsAndPreventionView: React.FC<AlertsAndPreventionProps> = ({
           {selectedExposureType === 'avistamiento' && (
             <div className="p-4 rounded-xl bg-teal-50/70 border border-teal-200 flex flex-col gap-2 text-xs text-slate-800">
               <div className="font-bold text-[#123047]">
-                Avistamiento silvestre en Kabah
+                Avistamiento de fauna silvestre
               </div>
               <p>1. Mantén distancia (&gt; 15 m).</p>
               <p>2. No alimentes ni intentes capturar al animal.</p>
@@ -241,12 +236,15 @@ interface StatsAndAdminReviewProps {
     evidenceNote: string
   ) => void;
   onSelectIncidentOnMap: (incident: IncidentReport) => void;
+  /** Sólo el administrador ve los controles para verificar o descartar */
+  canReview: boolean;
 }
 
 export const StatsAndAdminReviewView: React.FC<StatsAndAdminReviewProps> = ({
   incidents,
   onUpdateIncidentStatus,
   onSelectIncidentOnMap,
+  canReview,
 }) => {
   const [speciesFilter, setSpeciesFilter] = useState<string>('all');
   const [statusFilter, setStatusFilter] = useState<string>('all');
@@ -398,7 +396,7 @@ export const StatsAndAdminReviewView: React.FC<StatsAndAdminReviewProps> = ({
           {/* Zone Breakdown */}
           <div className="border-t border-slate-100 pt-3 space-y-2">
             <div className="text-xs font-semibold text-slate-700">
-              Registros por Supermanzana / Sector Kabah
+              Registros por zona
             </div>
             {Object.entries(stats.byZone).map(([zone, count]) => (
               <div
@@ -417,8 +415,13 @@ export const StatsAndAdminReviewView: React.FC<StatsAndAdminReviewProps> = ({
         {/* Right 7 cols: Administrative Review & Verification Console (Funcionalidad 3) */}
         <div className="lg:col-span-7 bg-white border border-slate-200 rounded-2xl p-5 flex flex-col gap-3">
           <h2 className="text-base font-bold text-[#123047]">
-            Revisión Administrativa
+            {canReview ? 'Revisión Administrativa' : 'Reportes registrados'}
           </h2>
+          {!canReview && (
+            <p className="text-xs text-slate-500">
+              Sólo el personal administrador puede verificar o descartar reportes.
+            </p>
+          )}
 
           <div className="space-y-3">
             {filteredIncidents.map((inc) => {
@@ -468,6 +471,7 @@ export const StatsAndAdminReviewView: React.FC<StatsAndAdminReviewProps> = ({
                   </div>
 
                   {/* Source citation input for Admin Verification */}
+                  {canReview && (
                   <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 pt-1">
                     <input
                       type="text"
@@ -541,291 +545,12 @@ export const StatsAndAdminReviewView: React.FC<StatsAndAdminReviewProps> = ({
                       </button>
                     </div>
                   </div>
+                  )}
                 </div>
               );
             })}
           </div>
         </div>
-      </div>
-    </div>
-  );
-};
-
-/* ============================================================================
- * 3. VISTA GUÍA TÉCNICA: REACT NATIVE (UBER PIN) + POSTGIS + DOCKER
- * ========================================================================== */
-export const TechnicalBlueprintView: React.FC = () => {
-  const [activeCodeTab, setActiveCodeTab] = useState<
-    'react_native' | 'postgis' | 'docker'
-  >('react_native');
-  const [copiedTab, setCopiedTab] = useState<string | null>(null);
-
-  const codeSnippets: Record<'react_native' | 'postgis' | 'docker', string> = {
-    react_native: `// src/screens/UberPinMapScreen.tsx (React Native + Expo + react-native-maps / MapTiler)
-import React, { useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
-import MapView, { Polygon, Circle, UrlTile, Region } from 'react-native-maps';
-
-// Polígono rojo exacto del Parque Ecológico Kabah y SM 48, 50, 51, 56, 516, 523
-const KABAH_POLYGON = [
-  { latitude: 21.1538, longitude: -86.8355 }, // Norte: Av. Xcaret / Av. Kabah
-  { latitude: 21.1268, longitude: -86.8286 }, // Sureste: Av. Rodrigo Gómez / Av. Cancún
-  { latitude: 21.1252, longitude: -86.8578 }, // Suroeste: Av. Cancún / IMSS HGR 17
-];
-
-export default function UberPinMapScreen() {
-  const [centerPin, setCenterPin] = useState({
-    latitude: 21.1372,
-    longitude: -86.8398,
-  });
-
-  // 1. El mapa se mueve libremente; al soltarlo actualizamos la coordenada del Pin Central
-  const handleRegionChangeComplete = (region: Region) => {
-    setCenterPin({
-      latitude: Number(region.latitude.toFixed(5)),
-      longitude: Number(region.longitude.toFixed(5)),
-    });
-  };
-
-  return (
-    <View style={styles.container}>
-      <MapView
-        style={StyleSheet.absoluteFillObject}
-        initialRegion={{
-          latitude: 21.1372,
-          longitude: -86.8398,
-          latitudeDelta: 0.032,
-          longitudeDelta: 0.032,
-        }}
-        onRegionChangeComplete={handleRegionChangeComplete}
-      >
-        {/* Teselas gratuitas de MapTiler para el MVP académico */}
-        <UrlTile
-          urlTemplate="https://api.maptiler.com/maps/streets-v2/{z}/{x}/{y}.png?key=TU_API_KEY_MAPTILER"
-          maximumZ={19}
-        />
-
-        {/* Polígono Rojo del Área de Interés en Cancún */}
-        <Polygon
-          coordinates={KABAH_POLYGON}
-          strokeColor="#DC2626"
-          fillColor="rgba(220, 38, 38, 0.08)"
-          strokeWidth={3}
-        />
-
-        {/* Círculo de Privacidad Pública (150 metros) alrededor del punto */}
-        <Circle
-          center={centerPin}
-          radius={150}
-          strokeColor="#087E8B"
-          fillColor="rgba(8, 126, 139, 0.15)"
-        />
-      </MapView>
-
-      {/* 2. Pin Central Fijo Estilo Uber (pointerEvents="none" para no bloquear gestos) */}
-      <View pointerEvents="none" style={styles.centerPinOverlay}>
-        <View style={styles.pinBubble}>
-          <Text style={styles.pinText}>Radio de privacidad 150 m</Text>
-        </View>
-        <View style={styles.pinHead} />
-        <View style={styles.pinStem} />
-      </View>
-    </View>
-  );
-}`,
-    postgis: `-- 1. Inicializar extensión PostGIS en PostgreSQL (ejecutado en contenedor Docker)
-CREATE EXTENSION IF NOT EXISTS postgis;
-
--- 2. Tabla de Zonas / Geocercas Sanitarias en Cancún
-CREATE TABLE zonas_vigilancia (
-  id SERIAL PRIMARY KEY,
-  nombre VARCHAR(120) NOT NULL,
-  geom GEOMETRY(Polygon, 4326) NOT NULL
-);
-
--- Insertar el Polígono Triangular del Parque Ecológico Kabah (SRID 4326 - WGS84)
-INSERT INTO zonas_vigilancia (nombre, geom)
-VALUES (
-  'Corredor Parque Ecológico Kabah (SM 48, 50, 51, 56, 516, 523)',
-  ST_GeomFromText(
-    'POLYGON((
-      -86.8355 21.1538,
-      -86.8286 21.1268,
-      -86.8578 21.1252,
-      -86.8355 21.1538
-    ))',
-    4326
-  )
-);
-
--- 3. Consulta en NestJS antes de guardar un reporte ciudadano:
--- Verifica ST_Contains (que caiga dentro del triángulo) y aplica ST_SnapToGrid (~110m)
--- para no almacenar ni exponer jamás el domicilio exacto del ciudadano.
-SELECT
-  z.nombre AS zona_detectada,
-  ST_Contains(
-    z.geom,
-    ST_SetSRID(ST_MakePoint($1, $2), 4326)
-  ) AS dentro_del_poligono,
-  ST_AsGeoJSON(
-    ST_SnapToGrid(ST_SetSRID(ST_MakePoint($1, $2), 4326), 0.001)
-  ) AS coordenada_publica_aproximada
-FROM zonas_vigilancia z
-WHERE z.id = 1;`,
-    docker: `# docker-compose.yml (Se ejecuta SOLO en el VPS Linux de $200 MXN/mes, NO en los iPhones/tablets)
-version: '3.9'
-
-services:
-  db_postgis:
-    image: postgis/postgis:16-3.4-alpine
-    container_name: rabia_cun_postgis
-    restart: always
-    environment:
-      POSTGRES_USER: rabia_admin
-      POSTGRES_PASSWORD: \${DB_PASSWORD}
-      POSTGRES_DB: rabia_cun_geo
-    volumes:
-      - postgis_data:/var/lib/postgresql/data
-    ports:
-      - "5432:5432"
-
-  api_nestjs:
-    build: ./backend-nestjs
-    container_name: rabia_cun_api
-    restart: always
-    depends_on:
-      - db_postgis
-    environment:
-      DATABASE_URL: postgres://rabia_admin:\${DB_PASSWORD}@db_postgis:5432/rabia_cun_geo
-      PORT: 4000
-
-  caddy_https:
-    image: caddy:2-alpine
-    container_name: rabia_cun_proxy
-    restart: always
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile
-      - caddy_data:/data
-
-volumes:
-  postgis_data:
-  caddy_data:`,
-  };
-
-  const handleCopy = (key: 'react_native' | 'postgis' | 'docker') => {
-    navigator.clipboard?.writeText(codeSnippets[key]);
-    setCopiedTab(key);
-    setTimeout(() => setCopiedTab(null), 2000);
-  };
-
-  return (
-    <div className="flex flex-col gap-6">
-      {/* Direct Answer Card: Docker vs React Native on iPhones & Tablets */}
-      <div className="bg-white border border-slate-200 rounded-2xl p-6">
-        <h2 className="text-xl font-bold text-[#123047]">
-          Arquitectura Recomendada: ¿Es necesario usar Docker para iPhones y Tablets?
-        </h2>
-        <p className="text-sm text-slate-600 mt-1 leading-relaxed">
-          Respuesta directa para tu entrega académica del <strong>Instituto Tecnológico de Cancún</strong>: Docker <strong>no se instala ni corre dentro de iPhones, iPads ni tablets Android</strong>. Su función es exclusivamente empaquetar tu servidor Backend y la base de datos PostGIS en el VPS Linux.
-        </p>
-
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-5">
-          <div className="p-4 rounded-xl bg-slate-50 border border-slate-200">
-            <div className="flex items-center gap-2 text-sm font-bold text-[#123047] mb-2">
-              <Smartphone className="w-4 h-4 text-[#087E8B]" />
-              <span>1. iPhones y Tablets (Sin Docker)</span>
-            </div>
-            <p className="text-xs text-slate-600 leading-relaxed">
-              Usas <strong>React Native + Expo (TypeScript)</strong>. Durante el desarrollo en clase, cualquier compañero con iPhone o tablet Android escanea el código QR con la app <strong>Expo Go</strong>. Para entrega final se compila en la nube con <strong>EAS Build</strong>.
-            </p>
-          </div>
-
-          <div className="p-4 rounded-xl bg-slate-50 border border-slate-200">
-            <div className="flex items-center gap-2 text-sm font-bold text-[#123047] mb-2">
-              <Database className="w-4 h-4 text-[#087E8B]" />
-              <span>2. Mapa Estilo Uber + Geocerca</span>
-            </div>
-            <p className="text-xs text-slate-600 leading-relaxed">
-              En vez de arrastrar un marcador lento, dejas un <strong>View con el pin fijo al centro</strong> de la pantalla (<code>pointerEvents=&quot;none&quot;</code>) y lees <code>onRegionChangeComplete</code> del mapa junto con un círculo de 150 m de privacidad.
-            </p>
-          </div>
-
-          <div className="p-4 rounded-xl bg-slate-50 border border-slate-200">
-            <div className="flex items-center gap-2 text-sm font-bold text-[#123047] mb-2">
-              <Server className="w-4 h-4 text-[#087E8B]" />
-              <span>3. Servidor VPS Linux (Sí usa Docker)</span>
-            </div>
-            <p className="text-xs text-slate-600 leading-relaxed">
-              En tu VPS de $200 MXN/mes sí usas <strong>Docker Compose</strong> para levantar <strong>PostgreSQL + PostGIS + NestJS + Caddy HTTPS</strong> en 10 segundos sin configurar librerías geoespaciales manualmente en Linux.
-            </p>
-          </div>
-        </div>
-      </div>
-
-      {/* Code Blueprint Viewer */}
-      <div className="bg-white border border-slate-200 rounded-2xl p-6 flex flex-col gap-4">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex flex-wrap items-center gap-1.5 p-1 bg-slate-100 rounded-xl">
-            <button
-              type="button"
-              onClick={() => setActiveCodeTab('react_native')}
-              className={`px-3.5 py-2 text-xs font-semibold rounded-lg transition-colors cursor-pointer ${
-                activeCodeTab === 'react_native'
-                  ? 'bg-[#123047] text-white'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              1. React Native (Pin Estilo Uber)
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveCodeTab('postgis')}
-              className={`px-3.5 py-2 text-xs font-semibold rounded-lg transition-colors cursor-pointer ${
-                activeCodeTab === 'postgis'
-                  ? 'bg-[#123047] text-white'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              2. SQL PostGIS (Polígono Kabah)
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveCodeTab('docker')}
-              className={`px-3.5 py-2 text-xs font-semibold rounded-lg transition-colors cursor-pointer ${
-                activeCodeTab === 'docker'
-                  ? 'bg-[#123047] text-white'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              3. Docker Compose (VPS Backend)
-            </button>
-          </div>
-
-          <button
-            type="button"
-            onClick={() => handleCopy(activeCodeTab)}
-            className="px-3.5 py-2 rounded-lg border border-slate-200 hover:bg-slate-50 text-xs font-semibold text-slate-700 inline-flex items-center gap-1.5 cursor-pointer"
-          >
-            {copiedTab === activeCodeTab ? (
-              <>
-                <Check className="w-3.5 h-3.5 text-[#087E8B]" />
-                <span>Código copiado</span>
-              </>
-            ) : (
-              <>
-                <Copy className="w-3.5 h-3.5" />
-                <span>Copiar bloque</span>
-              </>
-            )}
-          </button>
-        </div>
-
-        <pre className="p-4 rounded-xl bg-slate-900 text-slate-100 text-xs font-mono-tabular overflow-x-auto leading-relaxed">
-          <code>{codeSnippets[activeCodeTab]}</code>
-        </pre>
       </div>
     </div>
   );

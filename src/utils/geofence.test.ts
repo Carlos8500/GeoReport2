@@ -11,26 +11,29 @@ import {
 } from './geofence';
 import { IncidentReport } from '../types/rabiaCun';
 
-test('isPointInPolygon validates points inside and outside the Kabah red triangle', () => {
-  // Parque Ecológico Kabah center is strictly inside the red triangle
+test('isPointInPolygon accepts all of urban Cancún and rejects nearby towns', () => {
+  // Parque Kabah, Zona Hotelera, Centro, Puerto Juárez y poniente están dentro
   assert.equal(isPointInPolygon(KABAH_MAP_CENTER), true);
+  assert.equal(isPointInPolygon({ lat: 21.0605, lng: -86.7795 }), true);
+  assert.equal(isPointInPolygon({ lat: 21.1619, lng: -86.8268 }), true);
+  assert.equal(isPointInPolygon({ lat: 21.1855, lng: -86.8105 }), true);
+  assert.equal(isPointInPolygon({ lat: 21.152, lng: -86.905 }), true);
 
-  // Paraíso Villas / SM 51 inside the triangle
-  assert.equal(isPointInPolygon({ lat: 21.132, lng: -86.839 }), true);
-
-  // Zona Hotelera / Playa Delfines is outside the triangle
-  assert.equal(isPointInPolygon({ lat: 21.0605, lng: -86.7795 }), false);
-
-  // Far northwest outside Av. Andrés Quintana Roo
-  assert.equal(isPointInPolygon({ lat: 21.152, lng: -86.855 }), false);
+  // Isla Mujeres, Puerto Morelos y Playa del Carmen quedan fuera
+  assert.equal(isPointInPolygon({ lat: 21.232, lng: -86.731 }), false);
+  assert.equal(isPointInPolygon({ lat: 20.847, lng: -86.875 }), false);
+  assert.equal(isPointInPolygon({ lat: 20.629, lng: -87.073 }), false);
 });
 
-test('detectSupermanzana identifies Parque Ecológico Kabah and surrounding Supermanzanas', () => {
+test('detectSupermanzana names Kabah sectors and general Cancún regions', () => {
   const kabah = detectSupermanzana({ lat: 21.141, lng: -86.836 });
   assert.equal(kabah.code, 'Parque Ecológico Kabah');
   assert.equal(kabah.insidePolygon, true);
 
-  const outside = detectSupermanzana({ lat: 21.16, lng: -86.86 });
+  assert.equal(detectSupermanzana({ lat: 21.0605, lng: -86.7795 }).code, 'Zona Hotelera');
+  assert.equal(detectSupermanzana({ lat: 21.1619, lng: -86.8268 }).code, 'Centro (SM 1–30)');
+
+  const outside = detectSupermanzana({ lat: 20.629, lng: -87.073 });
   assert.equal(outside.insidePolygon, false);
 });
 

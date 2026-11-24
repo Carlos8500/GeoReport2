@@ -193,13 +193,4 @@ export const KABAH_LANDMARKS: LandmarkPoint[] = [
     supermanzana: 'SM 51 / SM 56',
     detail: 'Zona habitacional al sur del Parque Kabah junto a Av. Cancún (Las Torres).',
   },
-  {
-    id: 'lm-rodrigo',
-    name: 'Cruce Av. Rodrigo Gómez y Av. Cancún',
-    category: 'vialidad',
-    lat: 21.1268,
-    lng: -86.8286,
-    supermanzana: 'Vértice Sureste SM 56',
-    detail: 'Vértice sureste del polígono rojo donde converge Av. Kabah con Av. Huayacán.',
-  },
 ];

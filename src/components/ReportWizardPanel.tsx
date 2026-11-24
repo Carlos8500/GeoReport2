@@ -31,6 +31,8 @@ interface ReportWizardPanelProps {
   gyroscope: GyroscopeTelemetry;
   onSubmitReport: (newReport: IncidentReport) => void;
   onCancel: () => void;
+  /** true mientras la API guarda el reporte (evita envíos duplicados) */
+  isSubmitting?: boolean;
 }
 
 const EVENT_LABELS: Record<EventType, string> = {
@@ -76,6 +78,7 @@ export const ReportWizardPanel: React.FC<ReportWizardPanelProps> = ({
   isLocatingGps,
   gyroscope,
   onSubmitReport,
+  isSubmitting = false,
   onCancel,
 }) => {
   const [eventType, setEventType] = useState<EventType>('avistamiento');
@@ -119,7 +122,7 @@ export const ReportWizardPanel: React.FC<ReportWizardPanelProps> = ({
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!insidePolygon) {
-      setFormError('Tu ubicación actual está fuera del Polígono Kabah.');
+      setFormError('Tu ubicación actual está fuera de la zona urbana de Cancún.');
       return;
     }
     if (!photoPreviewUrl) {
@@ -264,7 +267,7 @@ export const ReportWizardPanel: React.FC<ReportWizardPanelProps> = ({
               <AlertTriangle className="w-4 h-4 text-red-600 shrink-0" />
             )}
             <span className="text-xs font-semibold text-slate-800 truncate">
-              {insidePolygon ? zoneInfo.code : 'Fuera del Polígono Kabah'}
+              {insidePolygon ? zoneInfo.code : 'Fuera de Cancún'}
             </span>
           </div>
 
@@ -365,7 +368,7 @@ export const ReportWizardPanel: React.FC<ReportWizardPanelProps> = ({
 
         <button
           type="submit"
-          disabled={!insidePolygon}
+          disabled={!insidePolygon || isSubmitting}
           className={`w-full py-2.5 px-4 rounded-xl text-xs font-bold inline-flex items-center justify-center gap-2 transition-colors cursor-pointer ${
             insidePolygon
               ? 'bg-[#087E8B] hover:bg-[#066873] text-white'
@@ -373,7 +376,7 @@ export const ReportWizardPanel: React.FC<ReportWizardPanelProps> = ({
           }`}
         >
           <Send className="w-3.5 h-3.5" />
-          <span>{insidePolygon ? 'Enviar Reporte' : 'Fuera del Polígono Kabah'}</span>
+          <span>{!insidePolygon ? 'Fuera de Cancún' : isSubmitting ? 'Enviando…' : 'Enviar Reporte'}</span>
         </button>
       </form>
     </div>
