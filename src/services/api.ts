@@ -2,21 +2,18 @@ import {
   AnimalSpecies,
   AuthUser,
   EventType,
+  AlertPayload,
   HealthAlert,
   IncidentReport,
   VerificationStatus,
 } from '../types/rabiaCun';
 import { getToken, notifyUnauthorized } from './session';
+import { getServerUrl } from './serverConfig';
 
 /**
- * Dirección base de la API.
- * - Vacía (por defecto): misma dirección que la página; en desarrollo Vite
- *   reenvía /api al contenedor Docker (ver vite.config.ts).
- * - En la APK (Capacitor) se define VITE_API_URL al compilar, por ejemplo
- *   VITE_API_URL=https://rabiacun.mi-tunel.com o http://192.168.1.50:4000
+ * Dirección base de la API: la define serverConfig.ts (vacía en el navegador
+ * = misma dirección que la página; en la APK, la que el usuario configura).
  */
-export const API_BASE = (import.meta.env.VITE_API_URL ?? '').replace(/\/+$/, '');
-
 /** Error de la API con el mensaje y los errores por campo devueltos por el servidor. */
 export class ApiError extends Error {
   status: number;
@@ -29,7 +26,7 @@ export class ApiError extends Error {
   }
 }
 
-const absoluteUrl = (path: string) => `${API_BASE}${path}`;
+const absoluteUrl = (path: string) => `${getServerUrl()}${path}`;
 
 /** Encabezado con el token de la sesión (si hay sesión iniciada). */
 const authHeader = (): Record<string, string> => {
@@ -75,6 +72,13 @@ async function request<T>(
   }
 
   const data = await response.json().catch(() => null);
+  // Una respuesta 200 sin JSON no viene de la API (p. ej. la APK sin servidor configurado)
+  if (response.ok && data === null) {
+    throw new ApiError(
+      0,
+      'La dirección configurada no responde como el servidor de RABIA-CUN. Revísala en «Servidor» (⚙).'
+    );
+  }
   // Sólo si se envió un token: un visitante sin sesión no tiene sesión que "expire"
   if (response.status === 401 && handleUnauthorized && auth.Authorization) {
     notifyUnauthorized();
@@ -216,6 +220,18 @@ export const incidentsApi = {
 
 export const alertsApi = {
   list: () => request<HealthAlert[]>('/api/alerts'),
+
+  // Sólo administrador (la API responde 403 a otros roles)
+  create: (payload: AlertPayload) =>
+    request<HealthAlert>('/api/alerts', { method: 'POST', body: JSON.stringify(payload) }),
+
+  update: (id: string, payload: AlertPayload) =>
+    request<HealthAlert>(`/api/alerts/${id}`, { method: 'PUT', body: JSON.stringify(payload) }),
+
+  remove: (id: string) =>
+    request<{ ok: boolean; deleted: { id: string; folio: string } }>(`/api/alerts/${id}`, {
+      method: 'DELETE',
+    }),
 };
 
 // ---------------------------------------------------------------------------

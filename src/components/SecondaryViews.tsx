@@ -1,10 +1,5 @@
 import React, { useState } from 'react';
 import {
-  ShieldCheck,
-  Clock,
-  UserCheck,
-  ExternalLink,
-  PhoneCall,
   FileCheck2,
   XCircle,
   Filter,
@@ -12,220 +7,14 @@ import {
 import {
   AnimalSpecies,
   EventType,
-  HealthAlert,
   IncidentReport,
   VerificationStatus,
 } from '../types/rabiaCun';
 import { computeIncidentSummary } from '../utils/geofence';
+import { PERIOD_OPTIONS, PeriodFilter, PeriodPreset, isInPeriod } from '../utils/filters';
 
 /* ============================================================================
- * 1. VISTA ALERTAS SANITARIAS Y CENTRO DE PREVENCIÓN (Funcionalidades 4 y 5)
- * ========================================================================== */
-interface AlertsAndPreventionProps {
-  alerts: HealthAlert[];
-  onFocusHospitalOnMap: () => void;
-}
-
-export const AlertsAndPreventionView: React.FC<AlertsAndPreventionProps> = ({
-  alerts,
-  onFocusHospitalOnMap,
-}) => {
-  const [selectedExposureType, setSelectedExposureType] = useState<
-    'mordedura' | 'contacto_saliva' | 'avistamiento'
-  >('mordedura');
-
-  return (
-    <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-      {/* Left 7 cols: Official Health Alerts */}
-      <div className="lg:col-span-7 flex flex-col gap-4">
-        <div className="bg-white border border-slate-200 rounded-2xl p-5">
-          <div className="mb-3">
-            <h2 className="text-lg font-bold text-[#123047]">
-              Alertas Sanitarias Oficiales
-            </h2>
-          </div>
-
-          <div className="flex flex-col gap-3">
-            {alerts.map((alert) => (
-              <article
-                key={alert.id}
-                className="p-4 rounded-xl border border-slate-200 bg-slate-50/60 flex flex-col gap-2.5"
-              >
-                <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
-                  <span className="font-mono-tabular font-semibold text-[#123047]">
-                    {alert.folio}
-                  </span>
-                  <span aria-hidden="true">·</span>
-                  <span className="font-semibold text-[#D97706]">
-                    {alert.severity.toUpperCase()}
-                  </span>
-                  <span aria-hidden="true">·</span>
-                  <span>Vigencia: {alert.validUntil}</span>
-                </div>
-
-                <h3 className="text-sm font-bold text-slate-900">
-                  {alert.title}
-                </h3>
-
-                <p className="text-xs text-slate-700 leading-relaxed">
-                  {alert.summary}
-                </p>
-
-                <ul className="space-y-1 text-xs text-slate-700 list-disc pl-4 bg-white border border-slate-200 rounded-lg p-3">
-                  {alert.recommendations.map((rec, i) => (
-                    <li key={i}>{rec}</li>
-                  ))}
-                </ul>
-
-                <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500">
-                  <span className="truncate">{alert.source}</span>
-                  <a
-                    href={alert.sourceUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="text-[#087E8B] font-semibold hover:underline inline-flex items-center gap-1 shrink-0"
-                  >
-                    <span>Fuente oficial</span>
-                    <ExternalLink className="w-3.5 h-3.5" />
-                  </a>
-                </div>
-              </article>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      {/* Right 5 cols: Interactive Prevention Center & Emergency Protocol */}
-      <div className="lg:col-span-5 flex flex-col gap-4">
-        <div className="bg-white border border-slate-200 rounded-2xl p-5 flex flex-col gap-3.5">
-          <h2 className="text-lg font-bold text-[#123047]">
-            Protocolo de Prevención
-          </h2>
-
-          {/* Interactive scenario selector */}
-          <div className="grid grid-cols-3 gap-1.5 p-1 bg-slate-100 rounded-xl">
-            <button
-              type="button"
-              onClick={() => setSelectedExposureType('mordedura')}
-              className={`py-2 px-2 text-xs font-semibold rounded-lg transition-colors whitespace-nowrap truncate cursor-pointer ${
-                selectedExposureType === 'mordedura'
-                  ? 'bg-[#123047] text-white shadow-xs'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              Mordedura
-            </button>
-            <button
-              type="button"
-              onClick={() => setSelectedExposureType('contacto_saliva')}
-              className={`py-2 px-2 text-xs font-semibold rounded-lg transition-colors whitespace-nowrap truncate cursor-pointer ${
-                selectedExposureType === 'contacto_saliva'
-                  ? 'bg-[#123047] text-white shadow-xs'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              Mascota
-            </button>
-            <button
-              type="button"
-              onClick={() => setSelectedExposureType('avistamiento')}
-              className={`py-2 px-2 text-xs font-semibold rounded-lg transition-colors whitespace-nowrap truncate cursor-pointer ${
-                selectedExposureType === 'avistamiento'
-                  ? 'bg-[#123047] text-white shadow-xs'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              Avistamiento
-            </button>
-          </div>
-
-          {selectedExposureType === 'mordedura' && (
-            <div className="p-4 rounded-xl bg-red-50/70 border border-red-200 flex flex-col gap-2.5">
-              <div className="text-xs font-bold text-red-900">
-                Atención Médica Inmediata
-              </div>
-              <ol className="space-y-1.5 text-xs text-slate-800 list-decimal pl-4">
-                <li>Lava la herida con agua y jabón durante 15 minutos.</li>
-                <li>No apliques pomadas ni cubras la herida.</li>
-                <li>Acude hoy mismo a Urgencias para valoración antirrábica.</li>
-              </ol>
-              <button
-                type="button"
-                onClick={onFocusHospitalOnMap}
-                className="mt-1 py-2 px-3 bg-[#087E8B] hover:bg-[#066873] text-white text-xs font-semibold rounded-lg transition-colors cursor-pointer"
-              >
-                Ubicar IMSS HGR No. 17 en el Mapa
-              </button>
-            </div>
-          )}
-
-          {selectedExposureType === 'contacto_saliva' && (
-            <div className="p-4 rounded-xl bg-amber-50/70 border border-amber-200 flex flex-col gap-2 text-xs text-slate-800">
-              <div className="font-bold text-amber-950">
-                Contacto con fauna silvestre
-              </div>
-              <p>1. Evita tocar saliva o heridas sin guantes.</p>
-              <p>2. Aísla a tu mascota y notifica a Bienestar Animal o veterinario.</p>
-            </div>
-          )}
-
-          {selectedExposureType === 'avistamiento' && (
-            <div className="p-4 rounded-xl bg-teal-50/70 border border-teal-200 flex flex-col gap-2 text-xs text-slate-800">
-              <div className="font-bold text-[#123047]">
-                Avistamiento de fauna silvestre
-              </div>
-              <p>1. Mantén distancia (&gt; 15 m).</p>
-              <p>2. No alimentes ni intentes capturar al animal.</p>
-            </div>
-          )}
-
-          {/* Official Cancún Directory */}
-          <div className="border-t border-slate-200 pt-3">
-            <h3 className="text-xs font-bold uppercase tracking-wide text-slate-500 mb-2.5">
-              Directorio Cancún
-            </h3>
-            <div className="space-y-2 text-xs">
-              <div className="p-2.5 rounded-xl border border-slate-200 flex items-center justify-between gap-2">
-                <div>
-                  <div className="font-bold text-slate-900">IMSS HGR No. 17</div>
-                  <div className="text-slate-500">Av. Politécnico / SM 509</div>
-                </div>
-                <span className="font-mono-tabular font-semibold text-[#087E8B] shrink-0">
-                  24h
-                </span>
-              </div>
-
-              <div className="p-2.5 rounded-xl border border-slate-200 flex items-center justify-between gap-2">
-                <div>
-                  <div className="font-bold text-slate-900">Jurisdicción Sanitaria 2</div>
-                  <div className="text-slate-500">SESA Quintana Roo</div>
-                </div>
-                <span className="inline-flex items-center gap-1 font-mono-tabular font-semibold text-slate-800 shrink-0">
-                  <PhoneCall className="w-3.5 h-3.5 text-[#087E8B]" />
-                  998 884 4803
-                </span>
-              </div>
-
-              <div className="p-2.5 rounded-xl border border-slate-200 flex items-center justify-between gap-2">
-                <div>
-                  <div className="font-bold text-slate-900">Bienestar Animal BJ</div>
-                  <div className="text-slate-500">SM 99 · Cancún</div>
-                </div>
-                <span className="inline-flex items-center gap-1 font-mono-tabular font-semibold text-slate-800 shrink-0">
-                  <PhoneCall className="w-3.5 h-3.5 text-[#087E8B]" />
-                  998 892 3326
-                </span>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-};
-
-/* ============================================================================
- * 2. VISTA ESTADÍSTICAS DESCRIPTIVAS Y CONSOLA DE REVISIÓN (Funcionalidades 3 y 6)
+ * VISTA ESTADÍSTICAS DESCRIPTIVAS Y CONSOLA DE REVISIÓN (Funcionalidades 3 y 6)
  * ========================================================================== */
 interface StatsAndAdminReviewProps {
   incidents: IncidentReport[];
@@ -250,12 +39,29 @@ export const StatsAndAdminReviewView: React.FC<StatsAndAdminReviewProps> = ({
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [sourceDrafts, setSourceDrafts] = useState<Record<string, string>>({});
 
+  const [eventFilter, setEventFilter] = useState<string>('all');
+  const [period, setPeriod] = useState<PeriodFilter>({ preset: 'all' });
+
   const filteredIncidents = incidents.filter((inc) => {
     if (speciesFilter !== 'all' && inc.species !== speciesFilter) return false;
+    if (eventFilter !== 'all' && inc.eventType !== eventFilter) return false;
     if (statusFilter !== 'all' && inc.verificationStatus !== statusFilter)
       return false;
+    if (!isInPeriod(inc.reportedAt, period)) return false;
     return true;
   });
+  const hasFilters =
+    speciesFilter !== 'all' ||
+    eventFilter !== 'all' ||
+    statusFilter !== 'all' ||
+    period.preset !== 'all';
+  const clearFilters = () => {
+    setSpeciesFilter('all');
+    setEventFilter('all');
+    setStatusFilter('all');
+    setPeriod({ preset: 'all' });
+  };
+  const selectClass = 'w-full px-3 py-2 text-xs bg-slate-50 border border-slate-200 rounded-lg';
 
   const stats = computeIncidentSummary(filteredIncidents);
 
@@ -312,12 +118,80 @@ export const StatsAndAdminReviewView: React.FC<StatsAndAdminReviewProps> = ({
         <div className="lg:col-span-5 bg-white border border-slate-200 rounded-2xl p-6 flex flex-col gap-4">
           <div className="flex items-center justify-between">
             <h2 className="text-lg font-bold text-[#123047]">
-              Distribución por Especie y Zona
+              Distribución de registros
             </h2>
             <Filter className="w-4 h-4 text-slate-400" />
           </div>
 
           <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label htmlFor="stats-period-filter" className="block text-xs font-semibold text-slate-600 mb-1">
+                Periodo
+              </label>
+              <select
+                id="stats-period-filter"
+                value={period.preset}
+                onChange={(e) => setPeriod((prev) => ({ ...prev, preset: e.target.value as PeriodPreset }))}
+                className={selectClass}
+              >
+                {PERIOD_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label htmlFor="stats-event-filter" className="block text-xs font-semibold text-slate-600 mb-1">
+                Tipo de evento
+              </label>
+              <select
+                id="stats-event-filter"
+                value={eventFilter}
+                onChange={(e) => setEventFilter(e.target.value)}
+                className={selectClass}
+              >
+                <option value="all">Todos los eventos</option>
+                {(Object.keys(eventLabels) as EventType[]).map((type) => (
+                  <option key={type} value={type}>
+                    {eventLabels[type]}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {period.preset === 'custom' && (
+              <>
+                <div>
+                  <label htmlFor="stats-from" className="block text-xs font-semibold text-slate-600 mb-1">
+                    Desde
+                  </label>
+                  <input
+                    id="stats-from"
+                    type="date"
+                    value={period.from ?? ''}
+                    max={period.to || undefined}
+                    onChange={(e) => setPeriod((prev) => ({ ...prev, from: e.target.value }))}
+                    className={selectClass}
+                  />
+                </div>
+                <div>
+                  <label htmlFor="stats-to" className="block text-xs font-semibold text-slate-600 mb-1">
+                    Hasta
+                  </label>
+                  <input
+                    id="stats-to"
+                    type="date"
+                    value={period.to ?? ''}
+                    min={period.from || undefined}
+                    onChange={(e) => setPeriod((prev) => ({ ...prev, to: e.target.value }))}
+                    className={selectClass}
+                  />
+                </div>
+              </>
+            )}
+
             <div>
               <label
                 htmlFor="stats-species-filter"
@@ -359,6 +233,46 @@ export const StatsAndAdminReviewView: React.FC<StatsAndAdminReviewProps> = ({
                 <option value="reporte_ciudadano">Reporte ciudadano</option>
               </select>
             </div>
+          </div>
+
+          {hasFilters && (
+            <button
+              type="button"
+              onClick={clearFilters}
+              className="self-start px-3 py-1.5 rounded-lg border border-slate-200 hover:bg-slate-50 text-xs font-semibold text-slate-700 cursor-pointer"
+            >
+              Quitar filtros
+            </button>
+          )}
+
+          {/* Event Type Bars */}
+          <div className="space-y-2.5 pt-2">
+            <div className="text-xs font-semibold text-slate-700">
+              Registros por tipo de evento
+            </div>
+            {(Object.keys(eventLabels) as EventType[]).map((type) => {
+              const count = stats.byEventType[type] || 0;
+              const pct =
+                stats.totalActive > 0
+                  ? Math.round((count / stats.totalActive) * 100)
+                  : 0;
+              return (
+                <div key={type} className="text-xs">
+                  <div className="flex justify-between mb-1">
+                    <span className="text-slate-700 font-medium">{eventLabels[type]}</span>
+                    <span className="font-mono-tabular font-semibold text-slate-900">
+                      {count} ({pct}%)
+                    </span>
+                  </div>
+                  <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-[#123047] rounded-full transition-all"
+                      style={{ width: `${pct}%` }}
+                    />
+                  </div>
+                </div>
+              );
+            })}
           </div>
 
           {/* Species Bars */}
@@ -423,7 +337,13 @@ export const StatsAndAdminReviewView: React.FC<StatsAndAdminReviewProps> = ({
             </p>
           )}
 
+          <p className="text-[11px] text-slate-500">
+            {filteredIncidents.length} {filteredIncidents.length === 1 ? 'reporte' : 'reportes'} con los filtros actuales.
+          </p>
           <div className="space-y-3">
+            {filteredIncidents.length === 0 && (
+              <p className="text-xs text-slate-500 py-6 text-center">Ningún reporte coincide con los filtros.</p>
+            )}
             {filteredIncidents.map((inc) => {
               const draftSource =
                 sourceDrafts[inc.id] ??

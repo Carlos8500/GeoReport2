@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">RABIA-CUN</string>
+    <string name="title_activity_main">RABIA-CUN</string>
+    <string name="package_name">mx.edu.itcancun.rabiacun</string>
+    <string name="custom_url_scheme">mx.edu.itcancun.rabiacun</string>
+</resources>

@@ -1,0 +1,73 @@
+# Compila la app de iOS en una Mac de GitHub (gratis) y genera RABIA-CUN.ipa
+# SIN FIRMAR, listo para instalarse en iPhone/iPad con Sideloadly.
+#
+# Cómo usarlo:
+#   1. Sube los cambios a GitHub (push a main), o ve a la pestaña
+#      Actions → "iOS (.ipa para Sideloadly)" → "Run workflow".
+#   2. Cuando termine (unos 5-10 min), abre la ejecución y descarga
+#      "RABIA-CUN-ipa" en la sección Artifacts. Viene en un .zip:
+#      descomprímelo y arrastra RABIA-CUN.ipa a Sideloadly.
+
+name: iOS (.ipa para Sideloadly)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+jobs:
+  build-ios:
+    runs-on: macos-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Descargar el código
+        uses: actions/checkout@v4
+
+      - name: Usar la versión estable más reciente de Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Instalar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: Compilar la app web (Vite)
+        run: npm run build
+
+      - name: Copiar la app web al proyecto de iOS
+        run: npx cap sync ios
+
+      - name: Compilar la app de iOS (sin firma)
+        run: |
+          xcodebuild \
+            -project ios/App/App.xcodeproj \
+            -scheme App \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            build
+
+      - name: Empaquetar RABIA-CUN.ipa
+        run: |
+          mkdir -p Payload
+          cp -R build/Build/Products/Release-iphoneos/App.app Payload/
+          zip -qry RABIA-CUN.ipa Payload
+          ls -lh RABIA-CUN.ipa
+
+      - name: Guardar el .ipa para descargarlo
+        uses: actions/upload-artifact@v4
+        with:
+          name: RABIA-CUN-ipa
+          path: RABIA-CUN.ipa
+          retention-days: 30

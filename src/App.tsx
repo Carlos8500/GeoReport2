@@ -10,7 +10,6 @@ import {
   UserCheck,
   PlusCircle,
   Bell,
-  BarChart3,
   Map,
   CheckCircle2,
   Navigation,
@@ -23,6 +22,10 @@ import {
   Lock,
   LogIn,
   XCircle,
+  Home,
+  CalendarDays,
+  MapPin,
+  Settings,
 } from 'lucide-react';
 import {
   AnimalSpecies,
@@ -57,14 +60,33 @@ import {
 } from './utils/gyroscope';
 import { IncidentMap } from './components/IncidentMap';
 import { ReportWizardPanel } from './components/ReportWizardPanel';
-import {
-  AlertsAndPreventionView,
-  StatsAndAdminReviewView,
-} from './components/SecondaryViews';
+import { StatsAndAdminReviewView } from './components/SecondaryViews';
+import { AlertsView } from './components/AlertsView';
 import { ProfileView } from './components/ProfileView';
 import { AuthImage } from './components/AuthImage';
+import {
+  IonContent,
+  IonFooter,
+  IonHeader,
+  IonLabel,
+  IonPage,
+  IonRefresher,
+  IonRefresherContent,
+  IonTabBar,
+  IonTabButton,
+  useIonAlert,
+} from '@ionic/react';
+import { clearFixWatch, getCurrentFix, hasLocationPermission, watchFix } from './utils/location';
+import { HomeView } from './components/HomeView';
+import {
+  PERIOD_OPTIONS,
+  PeriodFilter,
+  PeriodPreset,
+  isInPeriod,
+  listZones,
+} from './utils/filters';
 
-type ActiveTab = 'mapa' | 'alertas' | 'estadisticas' | 'perfil';
+type ActiveTab = 'inicio' | 'mapa' | 'alertas' | 'estadisticas' | 'perfil';
 type ToastKind = 'success' | 'warning' | 'error';
 
 const TOAST_STYLES: Record<ToastKind, string> = {
@@ -80,6 +102,8 @@ interface AppProps {
   onUserChange: (user: AuthUser) => void;
   /** Muestra la pantalla de inicio de sesión con un mensaje opcional */
   onRequestLogin: (message?: string | null) => void;
+  /** Abre la configuración del servidor (dirección de la API) */
+  onOpenServerSettings: () => void;
 }
 
 const EDIT_EVENT_TYPES: EventType[] = [
@@ -101,6 +125,7 @@ export default function App({
   onLogout,
   onUserChange,
   onRequestLogin,
+  onOpenServerSettings,
 }: AppProps) {
   const isGuest = currentUser === null;
   const isAdmin = currentUser?.role === 'admin';
@@ -108,7 +133,7 @@ export default function App({
   const canModify = (incident: IncidentReport) =>
     Boolean(currentUser) &&
     (isAdmin || incident.ownerId === currentUser?.id);
-  const [activeTab, setActiveTab] = useState<ActiveTab>('mapa');
+  const [activeTab, setActiveTab] = useState<ActiveTab>('inicio');
   const [incidents, setIncidents] = useState<IncidentReport[]>([]);
   const [alerts, setAlerts] = useState<HealthAlert[]>([]);
   const [isLoadingData, setIsLoadingData] = useState<boolean>(true);
@@ -119,6 +144,9 @@ export default function App({
     null
   );
   const [statusFilter, setStatusFilter] = useState<string>('all');
+  // Filtros del mapa por zona y fecha (Funcionalidad 1 del brief)
+  const [zoneFilter, setZoneFilter] = useState<string>('all');
+  const [mapPeriod, setMapPeriod] = useState<PeriodFilter>({ preset: 'all' });
   const [isReporting, setIsReporting] = useState<boolean>(false);
   const [draftLocation, setDraftLocation] = useState<LatLng>(KABAH_MAP_CENTER);
   const [userGpsLocation, setUserGpsLocation] = useState<LatLng>(KABAH_MAP_CENTER);
@@ -144,15 +172,26 @@ export default function App({
   const lastMotionTimeRef = useRef<number>(0);
   const trailingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const iosGyroRequestedRef = useRef<boolean>(false);
-  const geoWatchIdRef = useRef<number | null>(null);
+  const geoWatchIdRef = useRef<string | null>(null);
 
-  const visibleIncidents = incidents.filter((inc) => {
-    if (inc.verificationStatus === 'rechazado') return false;
-    if (statusFilter !== 'all' && inc.verificationStatus !== statusFilter) {
-      return false;
-    }
-    return true;
-  });
+  const publicIncidents = incidents.filter((inc) => inc.verificationStatus !== 'rechazado');
+  const mapZones = listZones(publicIncidents);
+  // Reportes que cumplen zona y fecha; los botones de estado cuentan sobre éstos
+  const zoneAndPeriodIncidents = publicIncidents.filter(
+    (inc) =>
+      (zoneFilter === 'all' || inc.supermanzana === zoneFilter) &&
+      isInPeriod(inc.reportedAt, mapPeriod)
+  );
+  const visibleIncidents = zoneAndPeriodIncidents.filter(
+    (inc) => statusFilter === 'all' || inc.verificationStatus === statusFilter
+  );
+  const hasMapFilters =
+    statusFilter !== 'all' || zoneFilter !== 'all' || mapPeriod.preset !== 'all';
+  const clearMapFilters = () => {
+    setStatusFilter('all');
+    setZoneFilter('all');
+    setMapPeriod({ preset: 'all' });
+  };
 
   const selectedIncident =
     incidents.find((i) => i.id === selectedIncidentId) ||
@@ -162,6 +201,26 @@ export default function App({
   useEffect(() => {
     setEditDraft(null);
   }, [selectedIncident?.id]);
+
+  // Diálogo de confirmación nativo de Ionic (reemplaza window.confirm)
+  const [presentAlert] = useIonAlert();
+  const confirmAction = useCallback(
+    (header: string, message: string, confirmText = 'Eliminar') =>
+      new Promise<boolean>((resolve) => {
+        presentAlert({
+          header,
+          message,
+          buttons: [
+            { text: 'Cancelar', role: 'cancel', handler: () => resolve(false) },
+            { text: confirmText, role: 'destructive', handler: () => resolve(true) },
+          ],
+          onDidDismiss: (e) => {
+            if (e.detail.role === 'backdrop') resolve(false);
+          },
+        });
+      }),
+    [presentAlert]
+  );
 
   const showToast = useCallback((msg: string, kind: ToastKind = 'success') => {
     setToast({ message: msg, kind });
@@ -199,7 +258,10 @@ export default function App({
       if (!isMounted) return;
       setIsLoadingData(false);
       if (!ok) {
-        showToast('No hay conexión con el servidor. Verifica que Docker esté encendido.', 'error');
+        showToast(
+          'No hay conexión con el servidor. Verifica que Docker esté encendido o revisa la dirección en el engrane ⚙.',
+          'error'
+        );
       }
     });
 
@@ -508,96 +570,74 @@ export default function App({
     [commitHeadingToState]
   );
 
+  // Sensor 1 · GPS (complemento @capacitor/geolocation, ver utils/location.ts)
   const startLiveGpsWatch = useCallback(() => {
-    if (!('geolocation' in navigator) || geoWatchIdRef.current !== null) return;
-    geoWatchIdRef.current = navigator.geolocation.watchPosition(
-      (pos) => {
-        const realCoords: LatLng = {
-          lat: Number(pos.coords.latitude.toFixed(5)),
-          lng: Number(pos.coords.longitude.toFixed(5)),
-        };
-        setUserGpsLocation((prevCoords) => {
-          if (Date.now() - lastHardwareOrientationTimeRef.current > 2000) {
-            const gpsHeading = pos.coords.heading;
-            if (typeof gpsHeading === 'number' && !Number.isNaN(gpsHeading)) {
+    if (geoWatchIdRef.current !== null) return;
+    geoWatchIdRef.current = 'pendiente';
+    watchFix((realCoords) => {
+      setUserGpsLocation((prevCoords) => {
+        if (Date.now() - lastHardwareOrientationTimeRef.current > 2000) {
+          if (realCoords.heading !== null) {
+            commitHeadingToState(
+              normalizeHeadingFloat(realCoords.heading),
+              lastBetaRef.current,
+              lastGammaRef.current,
+              'sensor_hardware'
+            );
+          } else {
+            const distMoved = calculateDistanceMeters(prevCoords, realCoords);
+            if (distMoved >= 4) {
+              const moveBearing = computeBearingDegrees(prevCoords, realCoords);
               commitHeadingToState(
-                normalizeHeadingFloat(gpsHeading),
+                moveBearing,
                 lastBetaRef.current,
                 lastGammaRef.current,
                 'sensor_hardware'
               );
-            } else {
-              const distMoved = calculateDistanceMeters(prevCoords, realCoords);
-              if (distMoved >= 4) {
-                const moveBearing = computeBearingDegrees(prevCoords, realCoords);
-                commitHeadingToState(
-                  moveBearing,
-                  lastBetaRef.current,
-                  lastGammaRef.current,
-                  'sensor_hardware'
-                );
-              }
             }
           }
-          return realCoords;
-        });
-        setGpsSource('hardware_gps');
-      },
-      () => {
-        // Ignore silent watch errors
-      },
-      { enableHighAccuracy: true, maximumAge: 5000 }
-    );
+        }
+        return { lat: realCoords.lat, lng: realCoords.lng };
+      });
+      setGpsSource('hardware_gps');
+    })
+      .then((id) => {
+        geoWatchIdRef.current = id;
+      })
+      .catch(() => {
+        geoWatchIdRef.current = null;
+      });
   }, [commitHeadingToState]);
 
-  // Automatically attach GPS watcher if permission was already granted
+  // Si el permiso ya estaba concedido, se sigue la ubicación desde el inicio
   useEffect(() => {
-    if ('permissions' in navigator && navigator.permissions?.query) {
-      navigator.permissions
-        .query({ name: 'geolocation' as PermissionName })
-        .then((status) => {
-          if (status.state === 'granted') {
-            startLiveGpsWatch();
-          }
-        })
-        .catch(() => {
-          // Permissions API not supported
-        });
-    }
+    hasLocationPermission().then((granted) => {
+      if (granted) startLiveGpsWatch();
+    });
     return () => {
-      if (geoWatchIdRef.current !== null && 'geolocation' in navigator) {
-        navigator.geolocation.clearWatch(geoWatchIdRef.current);
-        geoWatchIdRef.current = null;
+      if (geoWatchIdRef.current && geoWatchIdRef.current !== 'pendiente') {
+        clearFixWatch(geoWatchIdRef.current);
       }
+      geoWatchIdRef.current = null;
     };
   }, [startLiveGpsWatch]);
 
   const handleRequestHardwareGps = () => {
     ensureIosGyroPermission();
-    if (!('geolocation' in navigator)) {
-      showToast('El navegador no soporta geolocalización.', 'error');
-      return;
-    }
     setIsLocatingGps(true);
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        const realCoords: LatLng = {
-          lat: Number(pos.coords.latitude.toFixed(5)),
-          lng: Number(pos.coords.longitude.toFixed(5)),
-        };
-        setIsLocatingGps(false);
+    getCurrentFix()
+      .then((fix) => {
+        const realCoords: LatLng = { lat: fix.lat, lng: fix.lng };
         setUserGpsLocation(realCoords);
         setDraftLocation(realCoords);
         setGpsSource('hardware_gps');
         startLiveGpsWatch();
         showToast('GPS actualizado.');
-      },
-      () => {
-        setIsLocatingGps(false);
-        showToast('Sin acceso al GPS. Usa Demo para simular ubicación.', 'warning');
-      },
-      { enableHighAccuracy: true, timeout: 7000 }
-    );
+      })
+      .catch(() => {
+        showToast('Sin acceso al GPS. Activa la ubicación o usa Demo para simular.', 'warning');
+      })
+      .finally(() => setIsLocatingGps(false));
   };
 
   const handleStartReport = () => {
@@ -634,7 +674,7 @@ export default function App({
       setDraftLocation({ lat: created.approxLat, lng: created.approxLng });
       setActiveTab('mapa');
       setIsReporting(false);
-      setStatusFilter('all');
+      clearMapFilters();
       setApiOnline(true);
       showToast(`Reporte ${created.folio} registrado en ${created.supermanzana}.`);
     } catch (err) {
@@ -679,8 +719,9 @@ export default function App({
   };
 
   const handleDeleteIncident = async (incident: IncidentReport) => {
-    const confirmed = window.confirm(
-      `¿Eliminar definitivamente el reporte ${incident.folio}? Esta acción no se puede deshacer.`
+    const confirmed = await confirmAction(
+      `Eliminar ${incident.folio}`,
+      'El reporte, sus fotos y su historial se borrarán definitivamente. Esta acción no se puede deshacer.'
     );
     if (!confirmed) return;
     try {
@@ -766,16 +807,26 @@ export default function App({
     }
   };
 
+  // Pestaña resaltada en la barra inferior (Estadísticas se abre desde Inicio)
+  const mobileTab: string = isReporting
+    ? 'reportar'
+    : activeTab === 'estadisticas'
+    ? 'inicio'
+    : activeTab;
+
   return (
-    <div className="min-h-screen flex flex-col bg-[#F8FAFC] text-slate-900 pb-16 md:pb-0">
+    <IonPage>
+      {/* Encabezado fijo de Ionic: barra superior + avisos */}
+      <IonHeader className="ion-no-border">
       {/* Strict 3-Zone Top Bar Contract */}
-      <header className="sticky top-0 z-30 flex items-center justify-between gap-8 px-6 py-3.5 bg-[#123047] text-white border-b border-slate-800">
+      <header className="flex items-center justify-between gap-8 px-6 py-3.5 bg-[#123047] text-white border-b border-slate-800">
         {/* Zone 1: Single text element wordmark */}
         <a
-          href="#mapa"
+          href="#inicio"
           onClick={(e) => {
             e.preventDefault();
-            setActiveTab('mapa');
+            setActiveTab('inicio');
+            setIsReporting(false);
           }}
           className="text-lg font-bold tracking-tight text-white whitespace-nowrap shrink-0 font-display"
         >
@@ -787,6 +838,20 @@ export default function App({
           aria-label="Navegación principal"
           className="hidden md:flex items-center gap-6 text-sm font-medium text-slate-200"
         >
+          <button
+            type="button"
+            onClick={() => {
+              setActiveTab('inicio');
+              setIsReporting(false);
+            }}
+            className={`py-1 transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+              activeTab === 'inicio'
+                ? 'text-white underline underline-offset-8 decoration-[#2DD4BF] decoration-2 font-semibold'
+                : 'hover:text-white'
+            }`}
+          >
+            Inicio
+          </button>
           <button
             type="button"
             onClick={() => setActiveTab('mapa')}
@@ -874,7 +939,7 @@ export default function App({
             </span>
           </div>
           <div className="flex items-center gap-3 shrink-0">
-            {toast.kind === 'success' && activeTab !== 'mapa' && (
+            {toast.kind === 'success' && activeTab === 'estadisticas' && (
               <button
                 type="button"
                 onClick={() => {
@@ -898,7 +963,20 @@ export default function App({
         </div>
       )}
 
-      {/* Main Content Container */}
+      </IonHeader>
+
+      {/* Contenido desplazable de Ionic (deslizar hacia abajo para actualizar) */}
+      <IonContent className="rc-content" scrollEvents={false}>
+        <IonRefresher
+          slot="fixed"
+          disabled={activeTab === 'mapa'}
+          onIonRefresh={async (event) => {
+            await Promise.all([loadIncidents(), loadAlerts()]);
+            event.detail.complete();
+          }}
+        >
+          <IonRefresherContent pullingText="Desliza para actualizar" refreshingText="Actualizando…" />
+        </IonRefresher>
       <main className="flex-1 max-w-[1440px] w-full mx-auto px-4 sm:px-6 py-4 flex flex-col gap-4">
         {/* Compact Top Bar: Zone Title + LAN Badge + Filters */}
         <section className="bg-white border border-slate-200 rounded-2xl px-4 py-3 flex flex-wrap items-center justify-between gap-3">
@@ -927,6 +1005,15 @@ export default function App({
                 </button>
               )
             )}
+            <button
+              type="button"
+              onClick={onOpenServerSettings}
+              aria-label="Configurar servidor"
+              title="Configurar servidor"
+              className="p-1.5 rounded-lg text-slate-500 hover:text-[#123047] hover:bg-slate-100 shrink-0 cursor-pointer"
+            >
+              <Settings className="w-4 h-4" />
+            </button>
           </div>
 
           {/* Interactive Filter Controls for Map View */}
@@ -945,7 +1032,7 @@ export default function App({
                     : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
-                Todos ({incidents.filter((i) => i.verificationStatus !== 'rechazado').length})
+                Todos ({zoneAndPeriodIncidents.length})
               </button>
               <button
                 type="button"
@@ -958,7 +1045,7 @@ export default function App({
               >
                 Oficiales (
                 {
-                  incidents.filter(
+                  zoneAndPeriodIncidents.filter(
                     (i) => i.verificationStatus === 'verificado_oficial'
                   ).length
                 }
@@ -975,7 +1062,7 @@ export default function App({
               >
                 Revisión (
                 {
-                  incidents.filter((i) => i.verificationStatus === 'en_revision')
+                  zoneAndPeriodIncidents.filter((i) => i.verificationStatus === 'en_revision')
                     .length
                 }
                 )
@@ -991,7 +1078,7 @@ export default function App({
               >
                 Ciudadanos (
                 {
-                  incidents.filter(
+                  zoneAndPeriodIncidents.filter(
                     (i) => i.verificationStatus === 'reporte_ciudadano'
                   ).length
                 }
@@ -999,7 +1086,105 @@ export default function App({
               </button>
             </div>
           )}
+
+          {/* Filtros del mapa por zona y fecha */}
+          {activeTab === 'mapa' && (
+            <div
+              role="group"
+              aria-label="Filtrar reportes por zona y fecha"
+              className="w-full flex flex-wrap items-end gap-2 pt-2 border-t border-slate-100"
+            >
+              <label className="flex-1 min-w-[150px] text-[11px] font-semibold text-slate-600">
+                <span className="inline-flex items-center gap-1">
+                  <MapPin className="w-3 h-3" /> Zona
+                </span>
+                <select
+                  value={zoneFilter}
+                  onChange={(e) => setZoneFilter(e.target.value)}
+                  className="mt-1 w-full px-2.5 py-1.5 rounded-lg border border-slate-200 bg-slate-50 text-xs font-normal text-slate-900"
+                >
+                  <option value="all">Todas las zonas</option>
+                  {mapZones.map((zone) => (
+                    <option key={zone} value={zone}>
+                      {zone}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="flex-1 min-w-[150px] text-[11px] font-semibold text-slate-600">
+                <span className="inline-flex items-center gap-1">
+                  <CalendarDays className="w-3 h-3" /> Fecha
+                </span>
+                <select
+                  value={mapPeriod.preset}
+                  onChange={(e) =>
+                    setMapPeriod((prev) => ({ ...prev, preset: e.target.value as PeriodPreset }))
+                  }
+                  className="mt-1 w-full px-2.5 py-1.5 rounded-lg border border-slate-200 bg-slate-50 text-xs font-normal text-slate-900"
+                >
+                  {PERIOD_OPTIONS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              {mapPeriod.preset === 'custom' && (
+                <>
+                  <label className="text-[11px] font-semibold text-slate-600">
+                    Desde
+                    <input
+                      type="date"
+                      value={mapPeriod.from ?? ''}
+                      max={mapPeriod.to || undefined}
+                      onChange={(e) => setMapPeriod((prev) => ({ ...prev, from: e.target.value }))}
+                      className="mt-1 block px-2 py-1.5 rounded-lg border border-slate-200 bg-slate-50 text-xs font-normal text-slate-900"
+                    />
+                  </label>
+                  <label className="text-[11px] font-semibold text-slate-600">
+                    Hasta
+                    <input
+                      type="date"
+                      value={mapPeriod.to ?? ''}
+                      min={mapPeriod.from || undefined}
+                      onChange={(e) => setMapPeriod((prev) => ({ ...prev, to: e.target.value }))}
+                      className="mt-1 block px-2 py-1.5 rounded-lg border border-slate-200 bg-slate-50 text-xs font-normal text-slate-900"
+                    />
+                  </label>
+                </>
+              )}
+              {hasMapFilters && (
+                <button
+                  type="button"
+                  onClick={clearMapFilters}
+                  className="px-3 py-1.5 rounded-lg border border-slate-200 hover:bg-slate-50 text-xs font-semibold text-slate-700 cursor-pointer"
+                >
+                  Quitar filtros
+                </button>
+              )}
+            </div>
+          )}
         </section>
+
+        {/* VIEW 0: INICIO · alerta destacada + accesos rápidos */}
+        {activeTab === 'inicio' && (
+          <HomeView
+            alerts={alerts}
+            incidents={publicIncidents}
+            userName={currentUser?.name ?? null}
+            isAdmin={isAdmin}
+            isLoading={isLoadingData}
+            onNavigate={(target) => setActiveTab(target)}
+            onStartReport={handleStartReport}
+            onOpenIncident={(inc) => {
+              clearMapFilters();
+              setSelectedIncidentId(inc.id);
+              setDraftLocation({ lat: inc.approxLat, lng: inc.approxLng });
+              setIsReporting(false);
+              setActiveTab('mapa');
+            }}
+          />
+        )}
 
         {/* VIEW 1: MAPA DE INCIDENTES + FORMULARIO DE REPORTE / FICHA */}
         {activeTab === 'mapa' && (
@@ -1375,10 +1560,10 @@ export default function App({
                       </p>
                       <button
                         type="button"
-                        onClick={() => setStatusFilter('all')}
+                        onClick={clearMapFilters}
                         className="mt-3 px-4 py-2 bg-[#087E8B] text-white text-xs font-semibold rounded-lg cursor-pointer"
                       >
-                        Ver todos
+                        Quitar filtros
                       </button>
                     </div>
                   )}
@@ -1458,8 +1643,12 @@ export default function App({
 
         {/* VIEW 2: OFFICIAL HEALTH ALERTS & PREVENTION CENTER */}
         {activeTab === 'alertas' && (
-          <AlertsAndPreventionView
+          <AlertsView
             alerts={alerts}
+            isAdmin={isAdmin}
+            onAlertsChanged={loadAlerts}
+            showToast={showToast}
+            confirmAction={confirmAction}
             onFocusHospitalOnMap={() => {
               setDraftLocation(IMSS_HGR_17_COORDS);
               setActiveTab('mapa');
@@ -1518,87 +1707,71 @@ export default function App({
               setSelectedIncidentId(inc.id);
               setDraftLocation({ lat: inc.approxLat, lng: inc.approxLng });
               setIsReporting(false);
-              if (inc.verificationStatus !== 'rechazado') setStatusFilter('all');
+              if (inc.verificationStatus !== 'rechazado') clearMapFilters();
               setActiveTab('mapa');
             }}
           />
         )}
       </main>
 
-      {/* Mobile Bottom Tab Bar (Thumb-zone ergonomic navigation) */}
-      <nav
-        aria-label="Navegación móvil inferior"
-        className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-slate-200 grid grid-cols-5 items-center h-14 px-1"
-      >
-        <button
-          type="button"
-          onClick={() => {
-            setActiveTab('mapa');
-            setIsReporting(false);
-          }}
-          className={`flex flex-col items-center justify-center min-h-[44px] text-[10px] font-medium cursor-pointer ${
-            activeTab === 'mapa' && !isReporting
-              ? 'text-[#087E8B] font-bold'
-              : 'text-slate-600'
-          }`}
-        >
-          <Map className="w-4 h-4" />
-          <span className="mt-0.5">Mapa</span>
-        </button>
+      </IonContent>
 
-        <button
-          type="button"
-          onClick={handleStartReport}
-          className={`flex flex-col items-center justify-center min-h-[44px] text-[10px] font-medium cursor-pointer ${
-            isReporting ? 'text-[#087E8B] font-bold' : 'text-slate-600'
-          }`}
-        >
-          <PlusCircle className="w-4 h-4" />
-          <span className="mt-0.5">Reportar</span>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setActiveTab('alertas')}
-          className={`flex flex-col items-center justify-center min-h-[44px] text-[10px] font-medium cursor-pointer ${
-            activeTab === 'alertas'
-              ? 'text-[#087E8B] font-bold'
-              : 'text-slate-600'
-          }`}
-        >
-          <Bell className="w-4 h-4" />
-          <span className="mt-0.5">Alertas</span>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setActiveTab('estadisticas')}
-          className={`flex flex-col items-center justify-center min-h-[44px] text-[10px] font-medium cursor-pointer ${
-            activeTab === 'estadisticas'
-              ? 'text-[#087E8B] font-bold'
-              : 'text-slate-600'
-          }`}
-        >
-          <BarChart3 className="w-4 h-4" />
-          <span className="mt-0.5">{isAdmin ? 'Revisión' : 'Estadísticas'}</span>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => {
-            setActiveTab('perfil');
-            setIsReporting(false);
-          }}
-          className={`flex flex-col items-center justify-center min-h-[44px] text-[10px] font-medium cursor-pointer ${
-            activeTab === 'perfil'
-              ? 'text-[#087E8B] font-bold'
-              : 'text-slate-600'
-          }`}
-        >
-          {isGuest ? <LogIn className="w-4 h-4" /> : <UserRound className="w-4 h-4" />}
-          <span className="mt-0.5">{isGuest ? 'Entrar' : 'Perfil'}</span>
-        </button>
-      </nav>
-    </div>
+      {/* Barra de pestañas inferior de Ionic (sólo celular) */}
+      <div className="md:hidden">
+        <IonFooter>
+          <IonTabBar className="rc-tabbar">
+            <IonTabButton
+              tab="inicio"
+              className={mobileTab === 'inicio' ? 'rc-tab-on' : undefined}
+              onClick={() => {
+                setActiveTab('inicio');
+                setIsReporting(false);
+              }}
+            >
+              <Home className="w-5 h-5" />
+              <IonLabel>Inicio</IonLabel>
+            </IonTabButton>
+            <IonTabButton
+              tab="mapa"
+              className={mobileTab === 'mapa' ? 'rc-tab-on' : undefined}
+              onClick={() => {
+                setActiveTab('mapa');
+                setIsReporting(false);
+              }}
+            >
+              <Map className="w-5 h-5" />
+              <IonLabel>Mapa</IonLabel>
+            </IonTabButton>
+            <IonTabButton tab="reportar"
+              className={mobileTab === 'reportar' ? 'rc-tab-on' : undefined} onClick={handleStartReport}>
+              <PlusCircle className="w-5 h-5" />
+              <IonLabel>Reportar</IonLabel>
+            </IonTabButton>
+            <IonTabButton
+              tab="alertas"
+              className={mobileTab === 'alertas' ? 'rc-tab-on' : undefined}
+              onClick={() => {
+                setActiveTab('alertas');
+                setIsReporting(false);
+              }}
+            >
+              <Bell className="w-5 h-5" />
+              <IonLabel>Alertas</IonLabel>
+            </IonTabButton>
+            <IonTabButton
+              tab="perfil"
+              className={mobileTab === 'perfil' ? 'rc-tab-on' : undefined}
+              onClick={() => {
+                setActiveTab('perfil');
+                setIsReporting(false);
+              }}
+            >
+              {isGuest ? <LogIn className="w-5 h-5" /> : <UserRound className="w-5 h-5" />}
+              <IonLabel>{isGuest ? 'Entrar' : 'Perfil'}</IonLabel>
+            </IonTabButton>
+          </IonTabBar>
+        </IonFooter>
+      </div>
+    </IonPage>
   );
 }

@@ -10,6 +10,9 @@ import {
   Session,
 } from './services/session';
 import { AuthUser } from './types/rabiaCun';
+import { IonContent, IonPage } from '@ionic/react';
+import { ServerSettingsModal } from './components/ServerSettingsModal';
+import { needsServerSetup } from './services/serverConfig';
 
 /**
  * Controla la sesión de la app.
@@ -21,6 +24,24 @@ export default function AuthGate() {
   const [session, setSession] = useState<Session | null>(() => loadSession());
   const [showLogin, setShowLogin] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  // En la APK, el primer arranque pide la dirección del servidor
+  const [serverRequired, setServerRequired] = useState(() => needsServerSetup());
+  const [showServer, setShowServer] = useState(() => needsServerSetup());
+  const openServerSettings = useCallback(() => setShowServer(true), []);
+
+  const serverModal = (
+    <ServerSettingsModal
+      isOpen={showServer}
+      required={serverRequired}
+      onClose={() => setShowServer(false)}
+      onSaved={() => {
+        setServerRequired(false);
+        setShowServer(false);
+        // Se recarga para reconectar datos y tiempo real con el nuevo servidor
+        window.location.reload();
+      }}
+    />
+  );
 
   const requestLogin = useCallback((message: string | null = null) => {
     setNotice(message);
@@ -80,24 +101,34 @@ export default function AuthGate() {
 
   if (showLogin && !session) {
     return (
-      <LoginScreen
-        onAuthenticated={handleAuthenticated}
-        notice={notice}
-        onContinueAsGuest={() => {
-          setShowLogin(false);
-          setNotice(null);
-        }}
-      />
+      <IonPage>
+        <IonContent>
+          <LoginScreen
+            onAuthenticated={handleAuthenticated}
+            notice={notice}
+            onContinueAsGuest={() => {
+              setShowLogin(false);
+              setNotice(null);
+            }}
+            onOpenServerSettings={openServerSettings}
+          />
+        </IonContent>
+        {serverModal}
+      </IonPage>
     );
   }
 
   return (
-    <App
-      key={session?.user.id ?? 'visitante'}
-      currentUser={session?.user ?? null}
-      onLogout={logout}
-      onUserChange={handleUserChange}
-      onRequestLogin={requestLogin}
-    />
+    <>
+      <App
+        key={session?.user.id ?? 'visitante'}
+        currentUser={session?.user ?? null}
+        onLogout={logout}
+        onUserChange={handleUserChange}
+        onRequestLogin={requestLogin}
+        onOpenServerSettings={openServerSettings}
+      />
+      {serverModal}
+    </>
   );
 }

@@ -10,10 +10,11 @@ Permite consultar un mapa de incidentes con animales potencialmente transmisores
 
 | Capa | Tecnología |
 |---|---|
-| Frontend | React 19 + TypeScript, Vite, Tailwind CSS |
+| Frontend | Ionic React 9 + React 19 + TypeScript, Vite, Tailwind CSS |
+| App híbrida (APK) | Capacitor 8 · complementos `@capacitor/geolocation`, `@capacitor/camera`, `@capacitor/preferences` |
 | Mapa | Leaflet + teselas de OpenStreetMap |
-| Sensores | GPS (Geolocation API) y giroscopio/brújula (DeviceOrientation API) |
-| Cámara | `<input type="file" capture="environment">` |
+| Sensores | GPS (`@capacitor/geolocation`) y giroscopio/brújula (DeviceOrientation API) |
+| Cámara | `@capacitor/camera` en la APK; `<input capture="environment">` en el navegador |
 | Backend / API | Node.js + Express (JavaScript), API REST + Server-Sent Events |
 | Autenticación | Contraseñas con hash bcrypt, sesiones con token JWT, roles ciudadano/administrador |
 | Base de datos | PostgreSQL 16 (SQL) |
@@ -25,6 +26,8 @@ Permite consultar un mapa de incidentes con animales potencialmente transmisores
 ```
 GeoReport2/
 ├── docker-compose.yml          # PostgreSQL + API + Adminer
+├── capacitor.config.ts         # Empaquetado híbrido (Capacitor)
+├── android/                    # Proyecto Android generado por Capacitor
 ├── server/                     # Backend (API REST en JavaScript)
 │   ├── Dockerfile
 │   ├── db/init/01_schema.sql   # Tablas, llaves y relaciones
@@ -41,6 +44,7 @@ GeoReport2/
     ├── AuthGate.tsx            # Muestra el login o la app según la sesión
     ├── services/api.ts         # Peticiones asíncronas (fetch + Promises)
     ├── services/session.ts     # Sesión guardada con Web Storage (localStorage)
+    ├── services/serverConfig.ts # Dirección del servidor configurable en la app
     ├── components/             # Mapa, formulario de reporte, vistas
     └── utils/                  # Geocerca, giroscopio
 ```
@@ -101,10 +105,31 @@ Vite reenvía las peticiones `/api` al contenedor de la API (`vite.config.ts`). 
 VITE_API_URL=http://192.168.1.50:4000 npm run build
 ```
 
+### 3. App Android (APK)
+
+Requisitos: [Android Studio](https://developer.android.com/studio) (instala el SDK de Android) y un **JDK 21** ([Eclipse Temurin 21](https://adoptium.net/)). Android Studio 2026 trae Java 25, que la versión de Gradle de Capacitor (8.14) no admite.
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scriptsuild-apk.ps1
+```
+
+El script busca el JDK 21, escribe `android/local.properties` con la ruta del SDK, compila la app web, la copia al proyecto Android (`npx cap sync android`) y ejecuta `gradlew assembleDebug`. La APK queda en `android/app/build/outputs/apk/debug/app-debug.apk` (unos 9 MB).
+
+Para instalarla: copia la APK al celular, ábrela y permite «Instalar apps desconocidas». También se puede abrir el proyecto en Android Studio con `npm run android:open`.
+
+**Conexión con el servidor.** La primera vez que se abre la APK pide la dirección del servidor (también se cambia desde el engrane ⚙ junto a «Servidor en línea»). Se guarda en el teléfono, así que no hay que recompilar al cambiar de red:
+
+| Situación | Dirección |
+|---|---|
+| Celular en la misma Wi-Fi que la PC | `http://<IP-de-la-PC>:4000` (en la PC: `ipconfig` → Dirección IPv4) |
+| Celular en otra red o con datos | La dirección `https://….trycloudflare.com` que muestra `cloudflared tunnel --url http://localhost:4000` |
+
+La APK se sirve como `http://localhost` (`androidScheme: 'http'`) y permite tráfico HTTP (`usesCleartextTraffic`), por eso puede llamar a la API en la red local. El túnel rápido de Cloudflare no transmite el tiempo real (SSE): la app sigue actualizándose cada 15 s.
+
 ### Pruebas
 
 ```bash
-npm test    # pruebas de la geocerca
+npm test    # pruebas de la geocerca y de los filtros por fecha/zona
 ```
 
 Para la API, importa `postman/RABIA-CUN.postman_collection.json` en Postman. En las **Variables** de la colección escribe `adminPassword`, la misma que pusiste en `.env`, y usa **Run collection**. Son 37 peticiones con 60 pruebas automáticas: acceso de visitante, registro, login, CRUD de reportes y alertas, permisos por rol y errores 400/401/403/404/409. La colección crea un ciudadano de prueba y lo elimina al terminar.
@@ -169,6 +194,7 @@ Tablas: `usuarios`, `catalogo_eventos`, `catalogo_especies`, `reportes`, `report
 ## Problemas conocidos
 
 - **Antivirus con "análisis HTTPS"** (por ejemplo AVG o Avast): intercepta las descargas dentro de Docker y `npm install` falla en la imagen. Por eso el `Dockerfile` reutiliza `server/node_modules`: ejecuta `npm install` en `server/` antes de `docker compose up --build`.
+- El mismo antivirus bloquea las descargas de Gradle/Java. `scripts/build-apk.ps1` hace que Java use los certificados de Windows (`-Djavax.net.ssl.trustStoreType=Windows-ROOT`).
 - El celular debe estar en la **misma red** que la PC, y el Firewall de Windows debe permitir los puertos 3000, 3443 y 4000.
 
 ## Créditos y recursos externos

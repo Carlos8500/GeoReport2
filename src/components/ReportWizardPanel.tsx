@@ -8,6 +8,8 @@ import {
   MapPin,
   Trash2,
 } from 'lucide-react';
+import { Camera as CapCamera, CameraResultType, CameraSource } from '@capacitor/camera';
+import { isNativeApp } from '../services/serverConfig';
 import {
   AnimalSpecies,
   EventType,
@@ -111,6 +113,40 @@ export const ReportWizardPanel: React.FC<ReportWizardPanelProps> = ({
     setFormError(null);
   };
 
+  /**
+   * Cámara: en la APK usa el complemento nativo @capacitor/camera (tomar foto
+   * o elegir de la galería); en el navegador, el <input capture="environment">.
+   */
+  const handleTakePhoto = async () => {
+    if (!isNativeApp()) {
+      fileInputRef.current?.click();
+      return;
+    }
+    try {
+      const photo = await CapCamera.getPhoto({
+        resultType: CameraResultType.DataUrl,
+        source: CameraSource.Prompt,
+        quality: 75,
+        width: 1280,
+        correctOrientation: true,
+        promptLabelHeader: 'Fotografía de evidencia',
+        promptLabelPicture: 'Tomar foto',
+        promptLabelPhoto: 'Elegir de la galería',
+        promptLabelCancel: 'Cancelar',
+      });
+      if (photo.dataUrl) {
+        setPhotoPreviewUrl(await compressImageDataUrl(photo.dataUrl, 800));
+        setPhotoFileName(`camara.${photo.format}`);
+        setFormError(null);
+      }
+    } catch (err) {
+      // Cerrar la cámara sin tomar foto no es un error
+      if (!/cancel/i.test(String((err as Error)?.message ?? ''))) {
+        setFormError('No se pudo abrir la cámara. Revisa el permiso de cámara de la app.');
+      }
+    }
+  };
+
   const handleRemovePhoto = () => {
     setPhotoPreviewUrl(null);
     setPhotoFileName(null);
@@ -206,7 +242,7 @@ export const ReportWizardPanel: React.FC<ReportWizardPanelProps> = ({
         {!photoPreviewUrl ? (
           <button
             type="button"
-            onClick={() => fileInputRef.current?.click()}
+            onClick={handleTakePhoto}
             className="w-full py-5 px-4 rounded-2xl border-2 border-dashed border-[#087E8B] bg-teal-50/50 hover:bg-teal-50 transition-colors flex flex-col items-center justify-center gap-1.5 text-center cursor-pointer group"
           >
             <div className="w-11 h-11 rounded-xl bg-[#087E8B] text-white flex items-center justify-center shadow-xs group-hover:scale-105 transition-transform">
@@ -234,7 +270,7 @@ export const ReportWizardPanel: React.FC<ReportWizardPanelProps> = ({
               <div className="flex items-center gap-1.5 shrink-0">
                 <button
                   type="button"
-                  onClick={() => fileInputRef.current?.click()}
+                  onClick={handleTakePhoto}
                   className="px-2 py-1 rounded-md bg-white/15 hover:bg-white/25 text-white text-[11px] font-semibold cursor-pointer"
                 >
                   Repetir

@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { ArrowLeft, Eye, EyeOff, LogIn, ShieldCheck, UserPlus } from 'lucide-react';
+import { ArrowLeft, Eye, EyeOff, LogIn, Server, ShieldCheck, UserPlus } from 'lucide-react';
+import { getServerUrl } from '../services/serverConfig';
 import { ApiError, authApi, AuthResponse } from '../services/api';
 
 interface LoginScreenProps {
@@ -8,6 +9,8 @@ interface LoginScreenProps {
   notice?: string | null;
   /** Regresar a la app sin cuenta (modo visitante) */
   onContinueAsGuest?: () => void;
+  /** Abre la configuración del servidor (dirección de la API) */
+  onOpenServerSettings?: () => void;
 }
 
 type Mode = 'login' | 'register';
@@ -31,7 +34,12 @@ function validate(mode: Mode, name: string, email: string, password: string, con
   return errors;
 }
 
-export const LoginScreen: React.FC<LoginScreenProps> = ({ onAuthenticated, notice, onContinueAsGuest }) => {
+export const LoginScreen: React.FC<LoginScreenProps> = ({
+  onAuthenticated,
+  notice,
+  onContinueAsGuest,
+  onOpenServerSettings,
+}) => {
   const [mode, setMode] = useState<Mode>('login');
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
@@ -65,7 +73,11 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onAuthenticated, notic
       onAuthenticated(auth);
     } catch (err) {
       if (err instanceof ApiError) {
-        setFormError(err.status === 0 ? `${err.message} Verifica que el servidor esté encendido.` : err.message);
+        setFormError(
+          err.status === 0
+            ? `${err.message} Verifica que el servidor esté encendido o revisa su dirección en «Servidor».`
+            : err.message
+        );
         if (err.details) setErrors(err.details as FieldErrors);
       } else {
         setFormError('Ocurrió un error inesperado.');
@@ -230,6 +242,17 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onAuthenticated, notic
           RABIA-CUN no diagnostica ni sustituye a las autoridades sanitarias. Ante una mordedura o
           arañazo, lava la herida con agua y jabón 15 minutos y acude a atención médica.
         </p>
+
+        {onOpenServerSettings && (
+          <button
+            type="button"
+            onClick={onOpenServerSettings}
+            className="mt-3 mx-auto flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold text-slate-300 hover:text-white hover:bg-white/10 cursor-pointer"
+          >
+            <Server className="w-3.5 h-3.5" />
+            <span>Servidor: {getServerUrl() || 'esta misma dirección'}</span>
+          </button>
+        )}
       </div>
     </div>
   );

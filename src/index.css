@@ -1,5 +1,52 @@
 @import "tailwindcss";
 
+/* ---------- Tema de Ionic (paleta del brief) ----------
+   Fuera de @layer a propósito: los estilos de Ionic no tienen capa y
+   ganarían a las reglas de Tailwind. */
+:root {
+  --ion-font-family: 'Public Sans', system-ui, -apple-system, sans-serif;
+  --ion-background-color: #F8FAFC;
+  --ion-text-color: #0F172A;
+  --ion-color-primary: #087E8B;
+  --ion-color-primary-rgb: 8, 126, 139;
+  --ion-color-primary-contrast: #ffffff;
+  --ion-color-primary-shade: #066873;
+  --ion-color-primary-tint: #21909c;
+}
+
+.rc-tabbar {
+  --background: #ffffff;
+  --border: 1px solid #e2e8f0;
+  --color: #475569;
+  --color-selected: #087E8B;
+  height: 56px;
+}
+
+.rc-tabbar ion-tab-button.rc-tab-on {
+  --color: #087E8B;
+}
+
+.rc-tabbar ion-tab-button.rc-tab-on ion-label {
+  font-weight: 800;
+}
+
+.rc-tabbar ion-label {
+  font-size: 10px;
+  font-weight: 600;
+  margin-top: 2px;
+}
+
+.rc-server-modal {
+  --width: min(480px, 100%);
+  --height: min(560px, 100%);
+  --border-radius: 16px;
+}
+
+/* Ventanas de confirmación (useIonAlert) con los colores de la app */
+ion-alert .alert-button-role-destructive {
+  color: #b91c1c !important;
+}
+
 @layer base {
   :root {
     --font-display: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;

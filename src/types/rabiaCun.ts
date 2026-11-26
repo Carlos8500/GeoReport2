@@ -77,6 +77,9 @@ export interface HealthAlert {
   title: string;
   issuedAt: string;
   validUntil: string;
+  /** Fechas en formato AAAA-MM-DD (para formularios y filtros) */
+  issuedDate?: string;
+  validUntilDate?: string;
   zone: string;
   source: string;
   sourceUrl: string;
@@ -93,4 +96,18 @@ export interface LandmarkPoint {
   lng: number;
   supermanzana: string;
   detail: string;
+}
+
+/** Datos que el administrador envía para crear o editar una alerta */
+export interface AlertPayload {
+  folio: string;
+  title: string;
+  issuedDate: string;
+  validUntilDate: string;
+  zone: string;
+  source: string;
+  sourceUrl: string;
+  severity: HealthAlert['severity'];
+  summary: string;
+  recommendations: string[];
 }
