@@ -38,7 +38,12 @@ jobs:
           cache: npm
 
       - name: Instalar dependencias
-        run: npm ci
+        # package-lock.json se generó con npm 11.6.2; otras versiones de npm lo
+        # marcan como desincronizado (@emnapi/core) y "npm ci" falla.
+        run: |
+          npm install -g npm@11.6.2
+          npm -v
+          npm ci
 
       - name: Compilar la app web (Vite)
         run: npm run build
