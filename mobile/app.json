@@ -1,0 +1,32 @@
+{
+  "expo": {
+    "name": "RABIA-CUN",
+    "slug": "rabia-cun-mobile",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "RABIA-CUN usa tu ubicación para verificar que el reporte se hace en sitio.",
+        "NSCameraUsageDescription": "RABIA-CUN usa la cámara para tomar la foto de evidencia del reporte.",
+        "NSPhotoLibraryUsageDescription": "RABIA-CUN permite adjuntar una foto de tu galería como evidencia.",
+        "NSMotionUsageDescription": "RABIA-CUN usa el giroscopio para registrar la orientación del reporte."
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#E6F4FE",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "permissions": ["ACCESS_FINE_LOCATION", "ACCESS_COARSE_LOCATION", "CAMERA"],
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    }
+  }
+}

@@ -1,4 +1,4 @@
-# Compila la APK de depuración de RABIA-CUN.
+﻿# Compila la APK de depuración de RABIA-CUN.
 # Uso (desde la carpeta GeoReport2):  powershell -ExecutionPolicy Bypass -File scripts\build-apk.ps1
 #
 # Requisitos: Android Studio (SDK de Android) y un JDK 21. Gradle 8.14 de

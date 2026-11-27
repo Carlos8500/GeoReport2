@@ -122,9 +122,25 @@ Para instalarla: copia la APK al celular, ábrela y permite «Instalar apps desc
 | Situación | Dirección |
 |---|---|
 | Celular en la misma Wi-Fi que la PC | `http://<IP-de-la-PC>:4000` (en la PC: `ipconfig` → Dirección IPv4) |
-| Celular en otra red o con datos | La dirección `https://….trycloudflare.com` que muestra `cloudflared tunnel --url http://localhost:4000` |
+| Celular en otra red o con datos | La dirección `https://….trycloudflare.com` que muestra `scripts	unnel.ps1` (ver abajo) |
 
 La APK se sirve como `http://localhost` (`androidScheme: 'http'`) y permite tráfico HTTP (`usesCleartextTraffic`), por eso puede llamar a la API en la red local. El túnel rápido de Cloudflare no transmite el tiempo real (SSE): la app sigue actualizándose cada 15 s.
+
+### 4. Acceso desde cualquier red (Cloudflare Tunnel)
+
+Recomendado para la demostración: el celular no necesita estar en la misma Wi-Fi, no hay que abrir puertos del módem ni del Firewall y la conexión es HTTPS.
+
+1. Descarga `cloudflared-windows-amd64.exe` de las [versiones oficiales](https://github.com/cloudflare/cloudflared/releases) y guárdalo como `%USERPROFILE%\.tools\cloudflared\cloudflared.exe` (o ponlo en el PATH). No requiere instalación ni cuenta.
+2. Con Docker encendido:
+
+   ```powershell
+   powershell -ExecutionPolicy Bypass -File scripts	unnel.ps1
+   ```
+
+3. El script comprueba la API, abre el túnel, espera a que responda y copia la dirección `https://….trycloudflare.com` al portapapeles. Pásala al celular (por ejemplo, por WhatsApp) y pégala en la app: engrane ⚙ › Servidor › Guardar.
+4. Deja la ventana abierta mientras se use la app; `Ctrl+C` cierra el túnel.
+
+Limitaciones del túnel rápido ([documentación de Cloudflare](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/do-more-with-tunnels/trycloudflare/)): la dirección cambia en cada inicio, no transmite Server-Sent Events (la app se actualiza cada 15 s), admite hasta 200 peticiones simultáneas y no tiene garantía de disponibilidad. Para una dirección fija se necesita una cuenta de Cloudflare y un dominio propio (túnel con nombre).
 
 ### Pruebas
 
